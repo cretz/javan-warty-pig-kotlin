@@ -1,0 +1,67 @@
+group 'javan-warty-pig'
+version '0.1.0'
+
+buildscript {
+    ext.kotlin_version = '1.2.10'
+    repositories {
+        mavenCentral()
+        maven {
+            url 'https://dl.bintray.com/jetbrains/kotlin-native-dependencies'
+        }
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath 'org.jetbrains.kotlin:kotlin-native-gradle-plugin:+'
+    }
+}
+
+allprojects {
+    repositories {
+        mavenCentral()
+    }
+}
+
+project(':agent') {
+    apply plugin: 'konan'
+
+    def jdkHome = file(System.properties.'java.home').parentFile.toPath()
+    def includeBase = jdkHome.resolve('include')
+    def includeWin32 = includeBase.resolve('win32')
+
+    konanArtifacts {
+        interop('jvmti') {
+            target 'mingw', {
+                includeDirs includeBase, includeWin32
+            }
+        }
+
+        dynamic('agent') {
+            libraries {
+                artifact 'jvmti'
+            }
+            target 'mingw', {
+                linkerOpts '-Xlinker', '--export-all-symbols', 'src/main/cpp/kotlin_bridge.cpp',
+                        '-I', '\\"' + includeBase.toString() + '\\"', '-I', '\\"' + includeWin32.toString() + '\\"',
+                        '-I', 'build/konan/bin/mingw'
+            }
+        }
+    }
+}
+
+project(':fuzz') {
+
+    apply plugin: 'kotlin'
+    apply plugin: 'application'
+
+    applicationName = 'jwp-fuzz'
+    mainClassName = 'jwp.fuzz.cli.MainKt'
+
+    distTar.archiveName = 'jwp-fuzz.tar'
+    distZip.archiveName = 'jwp-fuzz.zip'
+
+    dependencies {
+        compile 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
+        testCompile 'org.jetbrains.kotlin:kotlin-test'
+        testCompile 'org.jetbrains.kotlin:kotlin-test-junit'
+    }
+}

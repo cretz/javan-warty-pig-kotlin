@@ -1,0 +1,3 @@
+rootProject.name = 'javan-warty-pig'
+include 'agent',
+        'fuzz'

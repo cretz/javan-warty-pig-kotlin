@@ -63,5 +63,24 @@ project(':fuzz') {
         compile 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
         testCompile 'org.jetbrains.kotlin:kotlin-test'
         testCompile 'org.jetbrains.kotlin:kotlin-test-junit'
+        testCompile 'org.junit.jupiter:junit-jupiter-api:5.0.2'
+        testRuntime 'org.junit.vintage:junit-vintage-engine:4.12.2'
+        testRuntime 'org.junit.jupiter:junit-jupiter-engine:5.0.2'
+        testRuntime 'org.junit.platform:junit-platform-console:1.0.2'
     }
+
+    compileTestKotlin.dependsOn(":agent:build")
+    // We override the test task here because the agent isn't working otherwise
+    test {
+        dependsOn 'runJunit'
+        onlyIf { false }
+    }
+    task runJunit(type: JavaExec) {
+        jvmArgs '-agentpath:../agent/build/konan/bin/mingw/agent.dll'
+        classpath = project.sourceSets.test.runtimeClasspath
+        main 'org.junit.platform.console.ConsoleLauncher'
+        args '--scan-class-path'
+        args '--details', 'none'
+    }
+
 }

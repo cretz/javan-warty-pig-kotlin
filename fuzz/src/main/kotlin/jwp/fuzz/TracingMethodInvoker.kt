@@ -9,7 +9,7 @@ abstract class TracingMethodInvoker {
     abstract fun invoke(
         mh: MethodHandle,
         params: List<*>,
-        stepHandler: Natives.StepHandler
+        tracer: Tracer
     ): CompletableFuture<Result>
 
     sealed class Result {
@@ -21,12 +21,12 @@ abstract class TracingMethodInvoker {
         override fun invoke(
             mh: MethodHandle,
             params: List<*>,
-            stepHandler: Natives.StepHandler
+            tracer: Tracer
         ) = CompletableFuture.supplyAsync(Supplier {
-            Natives.startTrace(Thread.currentThread(), stepHandler)
+            tracer.startTrace(Thread.currentThread())
             try { Result.Normal(mh.invokeWithArguments(params)) }
             catch (e: Throwable) { Result.Exception(e) }
-            finally { Natives.stopTrace(Thread.currentThread()) }
+            finally { tracer.stopTrace(Thread.currentThread()) }
         }, exec)
     }
 }

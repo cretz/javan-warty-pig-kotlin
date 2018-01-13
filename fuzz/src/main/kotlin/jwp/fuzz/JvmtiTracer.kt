@@ -12,14 +12,6 @@ class JvmtiTracer : Tracer {
 
     override fun stopTrace(thread: Thread) {
         _branches = synchronized(globalTracerStartStopLocker) { internalStopTrace(thread) }
-        println("DEBUG: Unique branches: " + _branches?.let { it.size / 5 })
-        val methodNameMap = HashMap<Long, String>()
-        fun cachedName(methodId: Long) = methodNameMap.getOrPut(methodId) {
-            (declaringClass(methodId)?.name ?: "<unknown>") + "::" + (methodName(methodId) ?: "<unknown>")
-        }
-        branches().forEach { (fromMeth, fromLoc, toMeth, toLoc, hits) ->
-            println("  From ${cachedName(fromMeth)}($fromLoc) to ${cachedName(toMeth)}($toLoc) - $hits hit(s)")
-        }
     }
 
     private external fun internalStartTrace(thread: Thread)

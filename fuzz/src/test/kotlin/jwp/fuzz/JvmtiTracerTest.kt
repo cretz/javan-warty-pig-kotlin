@@ -12,6 +12,8 @@ class JvmtiTracerTest {
             } finally {
                 stopTrace(Thread.currentThread())
             }
+            println("Hash: " + stableBranchesHash())
+            branchesWithResolvedMethods().sorted().forEach { println("  $it") }
         }
     }
 }

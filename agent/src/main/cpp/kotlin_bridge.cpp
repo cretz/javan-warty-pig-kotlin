@@ -14,15 +14,15 @@ JNIEXPORT extern "C" void JNICALL Agent_OnUnload(JavaVM *vm) {
     agent_symbols()->kotlin.root.jwp.agent.agentOnUnload((uintptr_t) vm);
 }
 
-JNIEXPORT extern "C" void JNICALL Java_jwp_fuzz_JvmtiTracer_startTrace(JNIEnv *env, jobject obj, jthread thread) {
+JNIEXPORT extern "C" void JNICALL Java_jwp_fuzz_JvmtiTracer_internalStartTrace(JNIEnv *env, jobject obj, jthread thread) {
     agent_symbols()->kotlin.root.jwp.agent.startTrace(
         (uintptr_t) env,
         (uintptr_t) obj,
         (uintptr_t) thread);
 }
 
-JNIEXPORT extern "C" void JNICALL Java_jwp_fuzz_JvmtiTracer_stopTrace(JNIEnv *env, jobject obj, jthread thread) {
-    agent_symbols()->kotlin.root.jwp.agent.stopTrace(
+JNIEXPORT extern "C" jlongArray JNICALL Java_jwp_fuzz_JvmtiTracer_internalStopTrace(JNIEnv *env, jobject obj, jthread thread) {
+    return (jlongArray) (uintptr_t) agent_symbols()->kotlin.root.jwp.agent.stopTrace(
         (uintptr_t) env,
         (uintptr_t) obj,
         (uintptr_t) thread);

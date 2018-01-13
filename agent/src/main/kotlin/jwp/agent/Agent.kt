@@ -4,38 +4,16 @@ package jwp.agent
 import jvmti.*
 import kotlinx.cinterop.*
 
-typealias RawVmPtr = Long
-typealias RawJniEnvPtr = Long
+// Need this global JNI env ref. Set once in init.
+private var jvmtiEnvRef: jvmtiEnvVar? = null
 
-var jvmtiEnvRef: jvmtiEnvVar? = null
-var stepCount = 0
-
+// Initial load of the agent to initialize some things
 fun agentOnLoad(vmPtr: RawVmPtr, optionsPtr: Long, reservedPtr: Long): jint =
     init(vmPtr)?.let { println("Error: $it"); JNI_ERR } ?: JNI_OK
 
-fun agentOnUnload(vmPtr: RawVmPtr) {
-    jvmtiEnvRef = null
-}
-
-fun startTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long) {
-    println("Starting trace")
-    stepCount = 0
-    val env = jvmtiEnvRef ?: run { println("No env"); return }
-    env.setEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, threadPtr.toCPointer()).
-        also { if (it != JVMTI_ERROR_NONE) println("Enable event failure code: $it") }
-}
-
-fun stopTrace(jniEnvPtr: Long, thisPtr: Long, threadPtr: Long) {
-    println("Stopping trace")
-    val env = jvmtiEnvRef ?: run { println("No env"); return }
-    env.setEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, threadPtr.toCPointer()).
-        also { if (it != JVMTI_ERROR_NONE) println("Disable event failure code: $it") }
-    println("Number of insns: $stepCount")
-    stepCount = 0
-}
-
-internal fun init(vmPtr: RawVmPtr): String? = memScoped {
-    // Get the JVMTI environment
+// Initialize the tracer, return error string on failure
+private fun init(vmPtr: RawVmPtr): String? = memScoped {
+    // Get the JVMTI environment and set the global ref
     val env = vmPtr.vm?.getEnv() ?: return "No environment"
     jvmtiEnvRef = env
 
@@ -43,48 +21,80 @@ internal fun init(vmPtr: RawVmPtr): String? = memScoped {
     val caps = alloc<jvmtiCapabilities>()
     caps.can_generate_single_step_events = 1
     env.addCapabilities(caps.ptr).
-        also { if (it != JVMTI_ERROR_NONE) return "Add caps failure code: $it" }
+            also { if (it != JVMTI_ERROR_NONE) return "Add caps failure code: $it" }
 
-    // Add callback
+    // Add the tracing callback
     val callbacks = alloc<jvmtiEventCallbacks>()
-    callbacks.SingleStep = staticCFunction { jvmtiEnvPtr, jniEnvPtr, thread, methodID, location ->
-        stepCount++
-    }
+    callbacks.SingleStep = staticCFunction(::traceStep)
     env.setEventCallbacks(callbacks.ptr).
-        also { if (it != JVMTI_ERROR_NONE) return "Set callbacks failure code: $it" }
+            also { if (it != JVMTI_ERROR_NONE) return "Set callbacks failure code: $it" }
 
     null
 }
 
-internal val RawVmPtr.vm: JavaVMVar? get() = toCPointer<JavaVMVar>()?.pointed
-internal val JavaVMVar.functions: JNIInvokeInterface_? get() = value?.pointed
-internal fun JavaVMVar.getEnv() = memScoped {
-    val jvmtiEnvPtr = alloc<CPointerVar<jvmtiEnvVar>>()
-    if (functions?.GetEnv?.invoke(ptr, jvmtiEnvPtr.ptr.reinterpret(), JVMTI_VERSION) != JNI_OK) return null
-    jvmtiEnvPtr.pointed
+// Final function run on this agent
+fun agentOnUnload(vmPtr: RawVmPtr) {
+    jvmtiEnvRef = null
 }
 
-internal val RawJniEnvPtr.jniEnv: JNIEnvVar? get() = toCPointer<JNIEnvVar>()?.pointed
-internal val JNIEnvVar.functions: JNINativeInterface_? get() = value?.pointed
-internal fun JNIEnvVar.getJavaVm() = memScoped {
-    val javaVmPtr = alloc<CPointerVar<JavaVMVar>>()
-    if (functions?.GetJavaVM?.invoke(ptr, javaVmPtr.ptr) != JNI_OK) return null
-    javaVmPtr.pointed
+// Called when trace is started on the thread. Expected to be globally synchronized along with stopTrace.
+fun startTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long) {
+    val env = jvmtiEnvRef ?: error("No env")
+
+    // Create the tracer state and put as a thread local
+    val state = TracerState(thisPtr.toCPointer()!!)
+    env.setThreadLocalStorage(threadPtr.toCPointer()!!, StableRef.create(state).asCPointer()).also {
+        require(it == JVMTI_ERROR_NONE) { "Set thread-local error code $it" }
+    }
+
+    // Enable stepping for this thread
+    env.setEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_SINGLE_STEP, threadPtr.toCPointer()).
+        also { if (it != JVMTI_ERROR_NONE) println("Enable event failure code: $it") }
 }
 
-internal val jvmtiEnvVar.functions: jvmtiInterface_1_? get() = value?.pointed
-internal fun jvmtiEnvVar.addCapabilities(caps: CPointer<jvmtiCapabilities>) =
-    functions?.AddCapabilities?.invoke(ptr, caps) ?: -1
-internal fun jvmtiEnvVar.setEventCallbacks(callbacks: CPointer<jvmtiEventCallbacks>) =
-    functions?.SetEventCallbacks?.invoke(ptr, callbacks, jvmtiEventCallbacks.size.toInt()) ?: -1
-// XXX: Kotlin can't handle varargs functions
-typealias EventNotificationModeFn =
-    CPointer<CFunction<(CPointer<jvmtiEnvVar>?, jvmtiEventMode, jvmtiEvent, jthread?) -> jvmtiError>>
-internal fun jvmtiEnvVar.setEventNotificationMode(
-    mode: jvmtiEventMode,
-    event: jvmtiEvent,
-    thread: jthread?
-): jvmtiError {
-    val fn: EventNotificationModeFn? = functions?.SetEventNotificationMode?.reinterpret()
-    return fn?.invoke(ptr, mode, event, thread) ?: -1
+// Called when trace is stopped on the thread. Expected to be globally synchronized along with startTrace.
+// This returns a pointer to the JVM array of longs.
+fun stopTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long): Long {
+    val env = jvmtiEnvRef ?: error("No env")
+    val jniEnv = jniEnvPtr.jniEnv ?: error("No JNI env")
+
+    // Disable stepping on this thread
+    env.setEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_SINGLE_STEP, threadPtr.toCPointer()).
+        also { if (it != JVMTI_ERROR_NONE) println("Disable event failure code: $it") }
+
+    // Get the state
+    val stateRef = env.getThreadLocalStorage(threadPtr.toCPointer()!!)?.asStableRef<TracerState>()
+    val state = stateRef?.get() ?: error("No state")
+
+    // Remove it from thread local storage
+    env.setThreadLocalStorage(threadPtr.toCPointer()!!, null).also {
+        require(it == JVMTI_ERROR_NONE) { "Set thread-local error code $it" }
+    }
+
+    // Create a long array with all of the tuples
+    val tuplesArray = jniEnv.newLongArray(state.branchTuples.size * 5)
+    // TODO: setLongArrayRegion(arr: jLongArray, start: jsize, len: jsize, buf: CPointer<jlongVar>)
+
+    // Dispose the stable ref
+    stateRef.dispose()
+
+    // Return the pointer
+    return tuplesArray.toLong()
+}
+
+// Called on each step
+private fun traceStep(
+    jvmtiEnvVar: CPointer<jvmtiEnvVar>?,
+    jniEnvVar: CPointer<JNIEnvVar>?,
+    thread: jthread?,
+    methodId: jmethodID?,
+    location: jlocation
+) {
+    val env = jvmtiEnvRef ?: error("No env")
+
+    // Get the thread-local state and mark the step
+    env.getThreadLocalStorage(thread!!)?.let { statePtr ->
+        // Mark the step
+        statePtr.asStableRef<TracerState>().get().step(methodId!!, location)
+    }
 }

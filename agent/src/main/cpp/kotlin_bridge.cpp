@@ -27,3 +27,11 @@ JNIEXPORT extern "C" jlongArray JNICALL Java_jwp_fuzz_JvmtiTracer_internalStopTr
         (uintptr_t) obj,
         (uintptr_t) thread);
 }
+
+JNIEXPORT extern "C" jstring JNICALL Java_jwp_fuzz_JvmtiTracer_internalMethodName(JNIEnv *env, jobject obj, jlong methodIdPtr) {
+    return (jstring) (uintptr_t) agent_symbols()->kotlin.root.jwp.agent.methodName((uintptr_t) env, methodIdPtr);
+}
+
+JNIEXPORT extern "C" jclass JNICALL Java_jwp_fuzz_JvmtiTracer_internalDeclaringClass(JNIEnv *env, jobject obj, jlong methodIdPtr) {
+    return (jclass) (uintptr_t) agent_symbols()->kotlin.root.jwp.agent.declaringClass((uintptr_t) env, methodIdPtr);
+}

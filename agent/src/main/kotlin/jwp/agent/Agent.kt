@@ -54,7 +54,7 @@ fun startTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long) {
 
 // Called when trace is stopped on the thread. Expected to be globally synchronized along with startTrace.
 // This returns a pointer to the JVM array of longs.
-fun stopTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long): Long {
+fun stopTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long): Long = memScoped {
     val env = jvmtiEnvRef ?: error("No env")
     val jniEnv = jniEnvPtr.jniEnv ?: error("No JNI env")
 
@@ -71,15 +71,25 @@ fun stopTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long): Long {
         require(it == JVMTI_ERROR_NONE) { "Set thread-local error code $it" }
     }
 
-    // Create a long array with all of the tuples
-    val tuplesArray = jniEnv.newLongArray(state.branchTuples.size * 5)
-    // TODO: setLongArrayRegion(arr: jLongArray, start: jsize, len: jsize, buf: CPointer<jlongVar>)
+    // Create native array w/ all tuple info
+    val tuplesNativeArray = allocArray<jlongVar>(state.branchTuples.size * 5)
+    var index = -1
+    state.branchTuples.forEach { (branchTuple, hits) ->
+        tuplesNativeArray[++index] = branchTuple.fromMethodId
+        tuplesNativeArray[++index] = branchTuple.fromLocation
+        tuplesNativeArray[++index] = branchTuple.toMethodId
+        tuplesNativeArray[++index] = branchTuple.toLocation
+        tuplesNativeArray[++index] = hits.toLong()
+    }
+    // Put in JVM array
+    val tuplesJniArray = jniEnv.newLongArray(state.branchTuples.size * 5) ?: error("Cannot create array")
+    jniEnv.setLongArrayRegion(tuplesJniArray, 0, state.branchTuples.size * 5, tuplesNativeArray)
 
     // Dispose the stable ref
     stateRef.dispose()
 
     // Return the pointer
-    return tuplesArray.toLong()
+    return tuplesJniArray.toLong()
 }
 
 // Called on each step
@@ -97,4 +107,17 @@ private fun traceStep(
         // Mark the step
         statePtr.asStableRef<TracerState>().get().step(methodId!!, location)
     }
+}
+
+fun methodName(jniEnvPtr: RawJniEnvPtr, methodIdPtr: Long): Long {
+    val env = jvmtiEnvRef ?: error("No env")
+    val jniEnv = jniEnvPtr.jniEnv ?: error("No JNI env")
+    return env.getMethodNameRaw(methodIdPtr.toCPointer()!!)?.let { namePtr ->
+        jniEnv.newStringUtf(namePtr).also { env.deallocate(namePtr) }.toLong()
+    } ?: 0
+}
+
+fun declaringClass(jniEnvPtr: RawJniEnvPtr, methodIdPtr: Long): Long {
+    val env = jvmtiEnvRef ?: error("No env")
+    return env.getMethodDeclaringClass(methodIdPtr.toCPointer()!!).toLong()
 }

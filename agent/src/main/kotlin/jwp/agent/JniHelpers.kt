@@ -26,6 +26,7 @@ internal fun JNIEnvVar.getMethodId(cls: jclass, name: String, sig: String) = mem
 }
 internal fun JNIEnvVar.getObjectClass(obj: jobject) = functions?.GetObjectClass?.invoke(ptr, obj)
 internal fun JNIEnvVar.newLongArray(size: jsize) = functions?.NewLongArray?.invoke(ptr, size)
+internal fun JNIEnvVar.newStringUtf(bytes: CPointer<ByteVar>) = functions?.NewStringUTF?.invoke(ptr, bytes)
 internal fun JNIEnvVar.setLongArrayRegion(arr: jlongArray, start: jsize, len: jsize, buf: CPointer<jlongVar>) =
     functions?.SetLongArrayRegion?.invoke(ptr, arr, start, len, buf)
 
@@ -34,15 +35,29 @@ internal fun jvmtiEnvVar.addCapabilities(caps: CPointer<jvmtiCapabilities>) =
     functions?.AddCapabilities?.invoke(ptr, caps) ?: -1
 internal fun jvmtiEnvVar.deallocate(allocPtr: CPointer<*>) =
     functions?.Deallocate?.invoke(ptr, allocPtr.reinterpret())
+internal fun jvmtiEnvVar.getClassSignatureRaw(cls: jclass): CPointer<ByteVar>? = memScoped {
+    val sig = alloc<CPointerVar<ByteVar>>()
+    if (functions?.GetClassSignature?.invoke(ptr, cls, sig.ptr, null) != JVMTI_ERROR_NONE) return null
+    return sig.value
+}
 internal fun jvmtiEnvVar.getCurrentThread(): jthread? = memScoped {
     val thread = alloc<jthreadVar>()
     if (functions?.GetCurrentThread?.invoke(ptr, thread.ptr) != JVMTI_ERROR_NONE) return null
     thread.value
 }
-internal fun jvmtiEnvVar.getMethodName(methodId: jmethodID): String? = memScoped {
+internal fun jvmtiEnvVar.getMethodDeclaringClass(methodId: jmethodID): jclass? = memScoped {
+    val cls = alloc<jclassVar>()
+    if (functions?.GetMethodDeclaringClass?.invoke(ptr, methodId, cls.ptr) != JVMTI_ERROR_NONE) return null
+    cls.value
+}
+internal fun jvmtiEnvVar.getMethodName(methodId: jmethodID): String? =
+    getMethodNameRaw(methodId)?.let { namePtr ->
+        namePtr.toKString().also { deallocate(namePtr) }
+    }
+internal fun jvmtiEnvVar.getMethodNameRaw(methodId: jmethodID): CPointer<ByteVar>? = memScoped {
     val methodName = alloc<CPointerVar<ByteVar>>()
     if (functions?.GetMethodName?.invoke(ptr, methodId, methodName.ptr, null, null) != JVMTI_ERROR_NONE) return null
-    methodName.value?.toKString().also { deallocate(methodName.value!!) }
+    methodName.value
 }
 internal fun jvmtiEnvVar.getThreadLocalStorage(thread: jthread): COpaquePointer? = memScoped {
     val pointerVar = alloc<COpaquePointerVar>()

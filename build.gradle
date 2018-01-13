@@ -36,6 +36,7 @@ project(':agent') {
         }
 
         dynamic('agent') {
+            enableOptimizations true
             libraries {
                 artifact 'jvmti'
             }

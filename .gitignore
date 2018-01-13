@@ -5,3 +5,5 @@
 /fuzz/out
 /fuzz/build
 /javan-warty-pig.iml
+/fuzz/bin
+.project

@@ -13,7 +13,7 @@ class JvmtiTracerTest : TestBase() {
         try {
             stringLen("Trace this!")
         } finally {
-            tracer.stopTrace(Thread.currentThread())
+            tracer.stopTrace()
         }
 
         // Confirm there is (only one of and back):

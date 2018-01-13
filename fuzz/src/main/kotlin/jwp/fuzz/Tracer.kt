@@ -1,10 +1,11 @@
 package jwp.fuzz
 
 import java.util.stream.Stream
+import kotlin.streams.asStream
 
 interface Tracer {
     fun startTrace(thread: Thread)
-    fun stopTrace(thread: Thread)
+    fun stopTrace()
 
     fun branches(): Stream<Branch>
     fun methodName(methodId: Long): String?

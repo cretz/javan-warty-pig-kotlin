@@ -38,12 +38,11 @@ fun agentOnUnload(vmPtr: RawVmPtr) {
 }
 
 // Called when trace is started on the thread. Expected to be globally synchronized along with stopTrace.
-fun startTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long) {
+fun startTrace(jniEnvPtr: RawJniEnvPtr, threadPtr: Long) {
     val env = jvmtiEnvRef ?: error("No env")
 
     // Create the tracer state and put as a thread local
-    val state = TracerState(thisPtr.toCPointer()!!)
-    env.setThreadLocalStorage(threadPtr.toCPointer()!!, StableRef.create(state).asCPointer()).also {
+    env.setThreadLocalStorage(threadPtr.toCPointer()!!, StableRef.create(TracerState()).asCPointer()).also {
         require(it == JVMTI_ERROR_NONE) { "Set thread-local error code $it" }
     }
 
@@ -54,7 +53,7 @@ fun startTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long) {
 
 // Called when trace is stopped on the thread. Expected to be globally synchronized along with startTrace.
 // This returns a pointer to the JVM array of longs.
-fun stopTrace(jniEnvPtr: RawJniEnvPtr, thisPtr: Long, threadPtr: Long): Long = memScoped {
+fun stopTrace(jniEnvPtr: RawJniEnvPtr, threadPtr: Long): Long = memScoped {
     val env = jvmtiEnvRef ?: error("No env")
     val jniEnv = jniEnvPtr.jniEnv ?: error("No JNI env")
 

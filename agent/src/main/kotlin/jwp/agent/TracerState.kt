@@ -3,7 +3,7 @@ package jwp.agent
 import jvmti.*
 import kotlinx.cinterop.*
 
-internal class TracerState(val tracerJavaObj: jobject) {
+internal class TracerState {
     private var previousMethodId: jmethodID? = null
     private var previousLocation: jlocation = -1
 

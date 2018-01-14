@@ -10,12 +10,7 @@ abstract class TracingMethodInvoker {
         tracer: Tracer,
         mh: MethodHandle,
         vararg params: Any
-    ): CompletableFuture<Result>
-
-    sealed class Result {
-        data class Normal(val value: Any) : Result()
-        data class Exception(val ex: Throwable) : Result()
-    }
+    ): CompletableFuture<TraceComplete>
 
     class SingleThreadTracingMethodInvoker(val exec: Executor) : TracingMethodInvoker() {
         override fun invoke(
@@ -23,11 +18,18 @@ abstract class TracingMethodInvoker {
             mh: MethodHandle,
             vararg params: Any
         ) = CompletableFuture.supplyAsync(Supplier {
-            try {
-                Result.Normal(JavaInvoker.invoke(tracer, mh, *params))
-            } catch (e: Throwable) {
-                Result.Exception(e)
+            JavaUtils.invokeTraced(tracer, mh, *params).let { traceComplete ->
+                if (traceComplete.exception == null)
+                    TraceComplete.Success(traceComplete.result, traceComplete.tracerResult)
+                else
+                    TraceComplete.Failure(traceComplete.exception, traceComplete.tracerResult)
             }
         }, exec)
+    }
+
+    sealed class TraceComplete {
+        abstract val traceResult: TraceResult
+        data class Success(val methodResult: Any, override val traceResult: TraceResult) : TraceComplete()
+        data class Failure(val methodException: Throwable, override val traceResult: TraceResult) : TraceComplete()
     }
 }

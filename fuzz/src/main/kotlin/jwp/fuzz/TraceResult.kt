@@ -1,36 +1,43 @@
 package jwp.fuzz
 
+import java.util.function.Predicate
 import java.util.stream.Stream
 import kotlin.streams.asStream
 
-interface TraceResult {
+abstract class TraceResult {
 
-    fun branches(): Stream<Branch>
-    fun branchesWithResolvedMethods(): Stream<BranchWithResolvedMethods>
+    abstract val branchesWithResolvedMethods: Stream<BranchWithResolvedMethods>
 
-    fun stableBranchesHash(): Int =
+    val stableBranchesHash: Int by lazy {
         // Sort the branches, hash each, then hash all together
-        branchesWithResolvedMethods().sorted().
-            mapToInt(BranchWithResolvedMethods::stableHashCode).toArray().contentHashCode()
+        branchesWithResolvedMethods.sorted().
+                mapToInt(BranchWithResolvedMethods::stableHashCode).toArray().contentHashCode()
+    }
+
+    fun filtered(pred: Predicate<BranchWithResolvedMethods>): TraceResult = let { orig ->
+        object : TraceResult() {
+            override val branchesWithResolvedMethods get() = orig.branchesWithResolvedMethods.filter(pred)
+        }
+    }
 
     // Each branch is a set of 5 longs: methodFrom, locationFrom, methodTo, locationTo,
     // and hit count. Note, some 5-sets of these may be all -1's which means they should not
     // be considered branches and should be ignored
-    class LongArrayBranches(val longs: LongArray) : TraceResult {
-        override fun branches() = longs.asSequence().chunked(5).mapNotNull {
+    class LongArrayBranches(val longs: LongArray) : TraceResult() {
+        fun branches() = longs.asSequence().chunked(5).mapNotNull {
             (fromMeth, fromLoc, toMeth, toLoc, hits) ->
                 if (fromMeth == -1L && fromLoc == -1L) null
                 else Branch(fromMeth, fromLoc, toMeth, toLoc, hits.toInt())
         }.asStream()
 
-        override fun branchesWithResolvedMethods(): Stream<BranchWithResolvedMethods> {
+        override val branchesWithResolvedMethods by lazy {
             // We'll cache the lookup, though I'm not convinced it improved performance
             val methodInfoMap = HashMap<Long, Pair<Class<*>?, String?>>()
             fun methodInfo(methodId: Long) = methodInfoMap.getOrPut(methodId) {
                 if (methodId < 0) Pair(null, null)
                 else Pair(JavaUtils.declaringClass(methodId), JavaUtils.methodName(methodId))
             }
-            return branches().map { branch ->
+            branches().map { branch ->
                 val (fromClass, fromName) = methodInfo(branch.fromMethodId)
                 val (toClass, toName) = methodInfo(branch.toMethodId)
                 BranchWithResolvedMethods(fromClass, fromName, toClass, toName, branch)

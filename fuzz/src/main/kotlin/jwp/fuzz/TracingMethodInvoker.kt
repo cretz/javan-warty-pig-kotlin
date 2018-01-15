@@ -9,14 +9,14 @@ abstract class TracingMethodInvoker {
     abstract fun invoke(
         tracer: Tracer,
         mh: MethodHandle,
-        vararg params: Any
+        vararg params: Any?
     ): CompletableFuture<ExecutionResult>
 
     class SingleThreadTracingMethodInvoker(val exec: Executor) : TracingMethodInvoker() {
         override fun invoke(
             tracer: Tracer,
             mh: MethodHandle,
-            vararg params: Any
+            vararg params: Any?
         ) = CompletableFuture.supplyAsync(Supplier {
             JavaUtils.invokeTraced(tracer, mh, *params).let { traceComplete ->
                 val invokeResult =

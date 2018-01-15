@@ -11,6 +11,9 @@ private var jvmtiEnvRef: jvmtiEnvVar? = null
 fun agentOnLoad(vmPtr: RawVmPtr, optionsPtr: Long, reservedPtr: Long): jint =
     init(vmPtr)?.let { println("Error: $it"); JNI_ERR } ?: JNI_OK
 
+fun agentOnAttach(vmPtr: RawVmPtr, optionsPtr: Long, reservedPtr: Long): jint =
+    init(vmPtr)?.let { println("Error: $it"); JNI_ERR } ?: JNI_OK
+
 // Initialize the tracer, return error string on failure
 private fun init(vmPtr: RawVmPtr): String? = memScoped {
     // Get the JVMTI environment and set the global ref
@@ -22,13 +25,13 @@ private fun init(vmPtr: RawVmPtr): String? = memScoped {
     caps.can_generate_single_step_events = 1
     caps.can_get_bytecodes = 1
     env.addCapabilities(caps.ptr).
-            also { if (it != JVMTI_ERROR_NONE) return "Add caps failure code: $it" }
+        also { if (it != JVMTI_ERROR_NONE) return "Add caps failure code: $it" }
 
     // Add the tracing callback
     val callbacks = alloc<jvmtiEventCallbacks>()
     callbacks.SingleStep = staticCFunction(::traceStep)
     env.setEventCallbacks(callbacks.ptr).
-            also { if (it != JVMTI_ERROR_NONE) return "Set callbacks failure code: $it" }
+        also { if (it != JVMTI_ERROR_NONE) return "Set callbacks failure code: $it" }
 
     null
 }

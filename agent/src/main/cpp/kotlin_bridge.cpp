@@ -10,6 +10,13 @@ JNIEXPORT extern "C" jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
         (uintptr_t) reserved);
 }
 
+JNIEXPORT extern "C" jint JNICALL Agent_OnAttach(JavaVM* vm, char *options, void *reserved) {
+    return agent_symbols()->kotlin.root.jwp.agent.agentOnAttach(
+        (uintptr_t) vm,
+        (uintptr_t) options,
+        (uintptr_t) reserved);
+}
+
 JNIEXPORT extern "C" void JNICALL Agent_OnUnload(JavaVM *vm) {
     agent_symbols()->kotlin.root.jwp.agent.agentOnUnload((uintptr_t) vm);
 }

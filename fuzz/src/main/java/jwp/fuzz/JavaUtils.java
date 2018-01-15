@@ -26,7 +26,7 @@ class JavaUtils {
         Thread thread = Thread.currentThread();
         tracer.startTrace(thread);
         try {
-            result = mh.invoke(args);
+            result = mh.invokeWithArguments(args);
             traceResult = tracer.stopTrace(thread);
             return new TraceComplete(result, traceResult);
         } catch (Throwable e) {

@@ -8,7 +8,7 @@ typealias RawJniEnvPtr = Long
 
 internal val RawVmPtr.vm: JavaVMVar? get() = toCPointer<JavaVMVar>()?.pointed
 internal val JavaVMVar.functions: JNIInvokeInterface_? get() = value?.pointed
-internal fun JavaVMVar.getEnv() = memScoped {
+internal fun JavaVMVar.getEnv(): jvmtiEnvVar? = memScoped {
     val jvmtiEnvPtr = alloc<CPointerVar<jvmtiEnvVar>>()
     if (functions?.GetEnv?.invoke(ptr, jvmtiEnvPtr.ptr.reinterpret(), JVMTI_VERSION) != JNI_OK) return null
     jvmtiEnvPtr.pointed

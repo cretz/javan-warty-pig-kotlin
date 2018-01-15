@@ -6,17 +6,17 @@ import kotlin.streams.asStream
 
 abstract class TraceResult {
 
-    abstract val branchesWithResolvedMethods: Stream<BranchWithResolvedMethods>
+    abstract val branchesWithResolvedMethods: Iterable<BranchWithResolvedMethods>
 
     val stableBranchesHash: Int by lazy {
         // Sort the branches, hash each, then hash all together
         branchesWithResolvedMethods.sorted().
-                mapToInt(BranchWithResolvedMethods::stableHashCode).toArray().contentHashCode()
+            map(BranchWithResolvedMethods::stableHashCode).toIntArray().contentHashCode()
     }
 
     fun filtered(pred: Predicate<BranchWithResolvedMethods>): TraceResult = let { orig ->
         object : TraceResult() {
-            override val branchesWithResolvedMethods get() = orig.branchesWithResolvedMethods.filter(pred)
+            override val branchesWithResolvedMethods get() = orig.branchesWithResolvedMethods.filter(pred::test)
         }
     }
 
@@ -28,7 +28,7 @@ abstract class TraceResult {
             (fromMeth, fromLoc, toMeth, toLoc, hits) ->
                 if (fromMeth == -1L && fromLoc == -1L) null
                 else Branch(fromMeth, fromLoc, toMeth, toLoc, hits.toInt())
-        }.asStream()
+        }.asIterable()
 
         override val branchesWithResolvedMethods by lazy {
             // We'll cache the lookup, though I'm not convinced it improved performance

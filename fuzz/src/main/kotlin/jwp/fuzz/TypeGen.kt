@@ -12,6 +12,7 @@ object TypeGen {
     val suggestedFixedClass: Map<Class<*>, Supplier<Iterable<*>>> by lazy {
         fun pair(cls: Class<*>?, fn: () -> Iterable<*>) = cls!! to Supplier(fn)
         mapOf(
+            // Primitives
             pair(Boolean::class.javaPrimitiveType, ::suggestedBoolean),
             pair(Boolean::class.javaObjectType, { suggestedBoolean cat nullGen }),
             pair(Byte::class.javaPrimitiveType, ::suggestedByte),
@@ -32,6 +33,8 @@ object TypeGen {
     }
 
     fun suggestedString(): Iterable<String> = TODO()
+
+    fun <T : Enum<T>> allEnums(cls: Class<T>): Iterable<T> = TODO()
 
     val nullGen by lazy { listOf(null) }
 

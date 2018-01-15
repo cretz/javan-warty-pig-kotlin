@@ -12,14 +12,12 @@ class TracerTest : TestBase() {
         val thread = Thread.currentThread()
         tracer.startTrace(thread)
         stringLen("Trace this!")
-        val result = tracer.stopTrace(Thread.currentThread())
+        val result = tracer.stopTrace(thread)
 
         // Confirm there is (only one of and back):
         //  testSomething -> stringLen(0) and stringLen -> testSomething
         //  stringLen(x) -> String::length(0) and String::length -> stringLen(x)
         val branches = result.branchesWithResolvedMethods().collect(Collectors.toList())
-        println("Branches: ${branches.size}")
-        branches.forEach { println("  $it") }
         fun assertSingleBranch(fromClass: Class<*>, fromMethod: String, toClass: Class<*>, toMethod: String) =
             branches.single {
                 it.fromMethodDeclaringClass == fromClass && it.fromMethodName == fromMethod &&

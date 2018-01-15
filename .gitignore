@@ -7,3 +7,5 @@
 /javan-warty-pig.iml
 /fuzz/bin
 .project
+.settings
+.classpath

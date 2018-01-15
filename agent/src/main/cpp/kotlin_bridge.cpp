@@ -26,6 +26,12 @@ JNIEXPORT extern "C" jlongArray JNICALL Java_jwp_fuzz_JavaUtils_stopJvmtiTrace(J
         (uintptr_t) thread);
 }
 
+JNIEXPORT extern "C" void JNICALL Java_jwp_fuzz_JavaUtils_markNonBranches(JNIEnv *env, jclass cls, jlongArray possible) {
+    agent_symbols()->kotlin.root.jwp.agent.markNonBranches(
+        (uintptr_t) env,
+        (uintptr_t) possible);
+}
+
 JNIEXPORT extern "C" jstring JNICALL Java_jwp_fuzz_JavaUtils_methodName(JNIEnv *env, jclass cls, jlong methodIdPtr) {
     return (jstring) (uintptr_t) agent_symbols()->kotlin.root.jwp.agent.methodName((uintptr_t) env, methodIdPtr);
 }

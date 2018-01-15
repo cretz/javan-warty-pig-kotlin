@@ -6,19 +6,32 @@ import java.lang.invoke.MethodHandle;
 
 class JavaUtils {
 
-    static native void startJvmtiTrace(@NotNull Thread thread);
-    static native long[] stopJvmtiTrace(@NotNull Thread thread);
+    static native void startJvmtiTrace(Thread thread);
+    // Only returns possible branches (i.e. different methods and
+    // location off by more than one), not actual branches (checking bytecodes).
+    // Note this returns 5-length longs.
+    static native long[] stopJvmtiTrace(Thread thread);
+
+    // Each possible branch is a 5-long section of the array. This method puts all 5
+    // values as -1 if the branch is not an actual branch.
+    static native void markNonBranches(long[] possible);
 
     static native String methodName(long methodId);
     static native Class<?> declaringClass(long methodId);
 
-    // Has to be in Java, Kotlin adds dumb result checks
-    static TraceComplete invokeTraced(@NotNull Tracer tracer, @NotNull MethodHandle mh, Object... args) throws Throwable {
-        tracer.startTrace(Thread.currentThread());
+    // Has to be in Java, Kotlin adds dumb result checks and extra insns unnecessarily
+    static TraceComplete invokeTraced(@NotNull Tracer tracer, @NotNull MethodHandle mh, Object... args) {
+        Object result;
+        TraceResult traceResult;
+        Thread thread = Thread.currentThread();
+        tracer.startTrace(thread);
         try {
-            return new TraceComplete(mh.invoke(args), tracer.stopTrace(Thread.currentThread()));
+            result = mh.invoke(args);
+            traceResult = tracer.stopTrace(thread);
+            return new TraceComplete(result, traceResult);
         } catch (Throwable e) {
-            return new TraceComplete(e, tracer.stopTrace(Thread.currentThread()));
+            traceResult = tracer.stopTrace(thread);
+            return new TraceComplete(e, traceResult);
         }
     }
 

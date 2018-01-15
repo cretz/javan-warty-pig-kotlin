@@ -3,10 +3,10 @@ package jwp.fuzz
 import java.util.stream.Collectors
 import kotlin.test.Test
 
-class JvmtiTracerTest : TestBase() {
+class TracerTest : TestBase() {
 
     @Test
-    fun testSimple() {
+    fun testSimpleJvmtiTracer() {
         // Setup tracer and run
         val tracer = Tracer.JvmtiTracer()
         val thread = Thread.currentThread()
@@ -18,13 +18,15 @@ class JvmtiTracerTest : TestBase() {
         //  testSomething -> stringLen(0) and stringLen -> testSomething
         //  stringLen(x) -> String::length(0) and String::length -> stringLen(x)
         val branches = result.branchesWithResolvedMethods().collect(Collectors.toList())
+        println("Branches: ${branches.size}")
+        branches.forEach { println("  $it") }
         fun assertSingleBranch(fromClass: Class<*>, fromMethod: String, toClass: Class<*>, toMethod: String) =
             branches.single {
                 it.fromMethodDeclaringClass == fromClass && it.fromMethodName == fromMethod &&
                     it.toMethodDeclaringClass == toClass && it.toMethodName == toMethod
             }
-        assertSingleBranch(javaClass, "testSimple", javaClass, "stringLen")
-        assertSingleBranch(javaClass, "stringLen", javaClass, "testSimple")
+        assertSingleBranch(javaClass, "testSimpleJvmtiTracer", javaClass, "stringLen")
+        assertSingleBranch(javaClass, "stringLen", javaClass, "testSimpleJvmtiTracer")
         assertSingleBranch(javaClass, "stringLen", String::class.java, "length")
         assertSingleBranch(String::class.java, "length", javaClass, "stringLen")
     }

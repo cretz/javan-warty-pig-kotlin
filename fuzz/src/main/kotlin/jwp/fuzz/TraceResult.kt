@@ -13,11 +13,14 @@ interface TraceResult {
         branchesWithResolvedMethods().sorted().
             mapToInt(BranchWithResolvedMethods::stableHashCode).toArray().contentHashCode()
 
-    // Each branch is a set of 5 longs:
-    // methodFrom, locationFrom, methodTo, locationTo, and hit count
+    // Each branch is a set of 5 longs: methodFrom, locationFrom, methodTo, locationTo,
+    // and hit count. Note, some 5-sets of these may be all -1's which means they should not
+    // be considered branches and should be ignored
     class LongArrayBranches(val longs: LongArray) : TraceResult {
-        override fun branches() = longs.asSequence().chunked(5) {
-            (fromMeth, fromLoc, toMeth, toLoc, hits) -> Branch(fromMeth, fromLoc, toMeth, toLoc, hits.toInt())
+        override fun branches() = longs.asSequence().chunked(5).mapNotNull {
+            (fromMeth, fromLoc, toMeth, toLoc, hits) ->
+                if (fromMeth == -1L && fromLoc == -1L) null
+                else Branch(fromMeth, fromLoc, toMeth, toLoc, hits.toInt())
         }.asStream()
 
         override fun branchesWithResolvedMethods(): Stream<BranchWithResolvedMethods> {
@@ -36,11 +39,11 @@ interface TraceResult {
     }
 
     data class Branch(
-            val fromMethodId: Long,
-            val fromLocation: Long,
-            val toMethodId: Long,
-            val toLocation: Long,
-            val hits: Int
+        val fromMethodId: Long,
+        val fromLocation: Long,
+        val toMethodId: Long,
+        val toLocation: Long,
+        val hits: Int
     ) {
         val hitBucket: Int get() = when (hits) {
             1, 2, 3 -> hits
@@ -62,13 +65,13 @@ interface TraceResult {
 
         val stableHashCode: Int by lazy {
             intArrayOf(
-                    fromMethodDeclaringClass?.name?.hashCode() ?: 0,
-                    fromMethodName?.hashCode() ?: 0,
-                    branch.fromLocation.hashCode(),
-                    toMethodDeclaringClass?.name?.hashCode() ?: 0,
-                    toMethodName?.hashCode() ?: 0,
-                    branch.toLocation.hashCode(),
-                    branch.hitBucket
+                fromMethodDeclaringClass?.name?.hashCode() ?: 0,
+                fromMethodName?.hashCode() ?: 0,
+                branch.fromLocation.hashCode(),
+                toMethodDeclaringClass?.name?.hashCode() ?: 0,
+                toMethodName?.hashCode() ?: 0,
+                branch.toLocation.hashCode(),
+                branch.hitBucket
             ).contentHashCode()
         }
 
@@ -76,7 +79,7 @@ interface TraceResult {
         override fun compareTo(other: BranchWithResolvedMethods) = stableHashCode.compareTo(other.stableHashCode)
 
         override fun toString() =
-                "From ${fromMethodDeclaringClass?.name}::$fromMethodName(${branch.fromLocation}) " +
-                        "to ${toMethodDeclaringClass?.name}::$toMethodName(${branch.toLocation}) - $stableHashCode"
+            "From ${fromMethodDeclaringClass?.name}::$fromMethodName(${branch.fromLocation}) " +
+                "to ${toMethodDeclaringClass?.name}::$toMethodName(${branch.toLocation}) - ${branch.hits} hits"
     }
 }

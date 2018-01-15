@@ -18,7 +18,7 @@ internal class TracerState {
 
     fun step(methodId: jmethodID, location: jlocation) {
         // It's a branch if it's a new method or the location is not the next one
-        if (previousMethodId != methodId || previousLocation + 1 != location) {
+        if (previousMethodId != null && (previousMethodId != methodId || previousLocation + 1 != location)) {
             val tuple = BranchTuple(
                 previousMethodId?.toLong() ?: -1,
                 previousLocation,

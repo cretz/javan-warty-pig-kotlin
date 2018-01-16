@@ -1,12 +1,13 @@
 package jwp.fuzz
 
 import java.lang.invoke.MethodHandle
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.Executor
+import java.util.concurrent.*
 import java.util.function.Supplier
 
 abstract class TracingMethodInvoker {
     abstract fun invoke(conf: Config, vararg params: Any?): CompletableFuture<ExecutionResult>
+
+    abstract fun shutdownAndWaitUntilComplete(timeout: Long, timeUnit: TimeUnit): Boolean
 
     data class Config(
         val tracer: Tracer,
@@ -14,7 +15,7 @@ abstract class TracingMethodInvoker {
         val branchClassExcluder: Fuzzer.BranchClassExcluder?
     )
 
-    class SingleThreadTracingMethodInvoker(val exec: Executor) : TracingMethodInvoker() {
+    class ExecutorServiceInvoker(val exec: ExecutorService) : TracingMethodInvoker() {
         override fun invoke(conf: Config, vararg params: Any?) = CompletableFuture.supplyAsync(Supplier {
             val beginNs = System.nanoTime()
             val traceComplete = JavaUtils.invokeTraced(conf.tracer, conf.mh, *params)
@@ -33,5 +34,13 @@ abstract class TracingMethodInvoker {
                 endNs - beginNs
             )
         }, exec)
+
+        override fun shutdownAndWaitUntilComplete(timeout: Long, timeUnit: TimeUnit) =
+            exec.shutdown().let { exec.awaitTermination(timeout, timeUnit) }
+    }
+
+    class CurrentThreadExecutorService :
+            ThreadPoolExecutor(0, 1, 0L, TimeUnit.SECONDS, SynchronousQueue(), ThreadPoolExecutor.CallerRunsPolicy()) {
+        override fun execute(command: Runnable) = rejectedExecutionHandler.rejectedExecution(command, this)
     }
 }

@@ -5,7 +5,9 @@ import jvmti.*
 import kotlinx.cinterop.*
 
 // Need this global JNI env ref. Set once in init.
-private var jvmtiEnvRef: jvmtiEnvVar? = null
+var jvmtiEnvRef: jvmtiEnvVar?
+    get() = globalJvmtiEnv?.pointed
+    set(value) { globalJvmtiEnv = value?.ptr }
 
 // Initial load of the agent to initialize some things
 fun agentOnLoad(vmPtr: RawVmPtr, optionsPtr: Long, reservedPtr: Long): jint =

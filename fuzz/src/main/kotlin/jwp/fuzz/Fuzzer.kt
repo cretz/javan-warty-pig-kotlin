@@ -31,6 +31,9 @@ class Fuzzer(val conf: Config) {
             if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
             if (conf.params is ParameterProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
         }
+
+        // Shutdown and wait for a really long time...
+        conf.invoker.shutdownAndWaitUntilComplete(1000, TimeUnit.DAYS)
     }
 
     sealed class FuzzException(msg: String, cause: Throwable) : RuntimeException(msg, cause) {
@@ -44,11 +47,9 @@ class Fuzzer(val conf: Config) {
         ),
         val postSubmissionHandler: PostSubmissionHandler? = null,
         // We default to just a single-thread, single-item queue
-        val invoker: TracingMethodInvoker = run {
-            val exec = ThreadPoolExecutor(1, 2, 30,
-                TimeUnit.SECONDS, ArrayBlockingQueue(1), ThreadPoolExecutor.CallerRunsPolicy())
-            TracingMethodInvoker.SingleThreadTracingMethodInvoker(exec)
-        },
+        val invoker: TracingMethodInvoker = TracingMethodInvoker.ExecutorServiceInvoker(
+            TracingMethodInvoker.CurrentThreadExecutorService()
+        ),
         val branchClassExcluder: BranchClassExcluder? = BranchClassExcluder.ByQualifiedClassNamePrefix(
             "java.", "jdk.internal.", "jwp.fuzz.", "kotlin.", "scala.", "sun."
         ),
@@ -75,13 +76,19 @@ class Fuzzer(val conf: Config) {
         ): CompletableFuture<ExecutionResult>?
 
         class TrackUniqueBranches : PostSubmissionHandler {
-            private val _results = LinkedHashMap<Int, ExecutionResult>()
-            val results: Map<Int, ExecutionResult> get() = _results
+            private val _uniqueBranchResults = LinkedHashMap<Int, ExecutionResult>()
+            val uniqueBranchResults: Collection<ExecutionResult> get() = _uniqueBranchResults.values
+
+            private var _totalExecutions = 0
+            val totalExecutions: Int get() = _totalExecutions
 
             override fun postSubmission(
                 conf: Config,
                 future: CompletableFuture<ExecutionResult>
-            ) = future.thenApply { it.apply { _results.putIfAbsent(traceResult.stableBranchesHash, this) } }
+            ) = future.thenApply {
+                _totalExecutions++
+                it.apply { _uniqueBranchResults.putIfAbsent(traceResult.stableBranchesHash, this) }
+            }
         }
     }
 }

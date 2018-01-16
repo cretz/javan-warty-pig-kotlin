@@ -22,19 +22,20 @@ class FuzzerTest : TestBase() {
                 "simpleMethod",
                 MethodType.methodType(String::class.java, Int::class.java, Boolean::class.java)
             ),
-            // XXX: Needed because https://github.com/JetBrains/kotlin-native/issues/1234
-            invoker = TracingMethodInvoker.SingleThreadTracingMethodInvoker(currentThreadExecutorService()),
             postSubmissionHandler = uniqTracker
         ))
         fuzzer.fuzz()
 
         // Check the branches that we expect...
-        val branches = uniqTracker.results.values
-        if (debug) branches.forEach { result ->
-            println("Params ${result.params.toList()} ran on unique path and returned ${result.invokeResult} " +
-                    "in ${result.nanoTime / 1000000}ms")
-            println("Hash ${result.traceResult.stableBranchesHash}, branches:")
-            result.traceResult.branchesWithResolvedMethods.forEach { println("  $it") }
+        val branches = uniqTracker.uniqueBranchResults
+        if (debug) {
+            println("Total execution count: ${uniqTracker.totalExecutions}")
+            branches.forEach { result ->
+                println("Params ${result.params.toList()} ran on unique path and returned ${result.invokeResult} " +
+                        "in ${result.nanoTime / 1000000}ms")
+                println("Hash ${result.traceResult.stableBranchesHash}, branches:")
+                result.traceResult.branchesWithResolvedMethods.forEach { println("  $it") }
+            }
         }
 
         // Helpers for checking the branches
@@ -68,15 +69,5 @@ class FuzzerTest : TestBase() {
         expectUnique({ it != 2 && it > 7 && it < 20 }, whoCares, "something else")
         // So...7 branches
         assertEquals(7, branches.size)
-    }
-
-    // XXX: Needed because https://github.com/JetBrains/kotlin-native/issues/1234
-    private fun currentThreadExecutorService(): ExecutorService {
-        val callerRunsPolicy = ThreadPoolExecutor.CallerRunsPolicy()
-        return object : ThreadPoolExecutor(0, 1, 0L, TimeUnit.SECONDS, SynchronousQueue(), callerRunsPolicy) {
-            override fun execute(command: Runnable) {
-                callerRunsPolicy.rejectedExecution(command, this)
-            }
-        }
     }
 }

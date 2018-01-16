@@ -164,6 +164,10 @@ object ParameterProvider {
         fun onResult(result: ExecutionResult)
     }
 
+    interface WithFuzzerConfig {
+        fun setFuzzerConfig(fuzzerConfig: Fuzzer.Config)
+    }
+
     class InfiniteRestartingIterable<T>(val orig: Iterable<T>) : Iterable<T> {
         var completedAtLeastOnce = false
         override fun iterator() = object : Iterator<T> {

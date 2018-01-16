@@ -13,21 +13,23 @@ class Fuzzer(val conf: Config) {
     fun fuzz() {
         // Just go over every param set, invoking...
         var first = true
+        if (conf.params is ParameterProvider.WithFuzzerConfig) conf.params.setFuzzerConfig(conf)
+        val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.mh, conf.branchClassExcluder)
         conf.params.forEach { paramSet ->
-            var fut = conf.invoker.invoke(conf.tracer, conf.mh, *paramSet)
+            var fut: CompletableFuture<ExecutionResult>? = conf.invoker.invoke(invokerConf, *paramSet)
             // As a special case for the first run, we wait for completion and fail the
             // whole thing if it's the wrong method type.
             if (first) {
                 first = false
-                fut.get().let { execRes ->
+                fut!!.get().let { execRes ->
                     if (execRes.invokeResult is ExecutionResult.InvokeResult.Failure &&
                             execRes.invokeResult.ex is WrongMethodTypeException) {
                         throw FuzzException.FirstRunFailed(execRes.invokeResult.ex)
                     }
                 }
             }
-            if (conf.onSubmission != null) fut = conf.onSubmission.apply(fut)
-            if (conf.params is ParameterProvider.WithFeedback) fut.thenAccept(conf.params::onResult)
+            if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
+            if (conf.params is ParameterProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
         }
     }
 
@@ -40,35 +42,46 @@ class Fuzzer(val conf: Config) {
         val params: Iterable<Array<Any?>> = ParameterProvider.suggested(
             mh.type().parameterArray().map { TypeGen.suggested(it) }.toTypedArray()
         ),
-        val onSubmission:
-            java.util.function.Function<CompletableFuture<ExecutionResult>, CompletableFuture<ExecutionResult>>? = null,
+        val postSubmissionHandler: PostSubmissionHandler? = null,
         // We default to just a single-thread, single-item queue
         val invoker: TracingMethodInvoker = run {
             val exec = ThreadPoolExecutor(1, 2, 30,
-                    TimeUnit.SECONDS, ArrayBlockingQueue(1), ThreadPoolExecutor.CallerRunsPolicy())
+                TimeUnit.SECONDS, ArrayBlockingQueue(1), ThreadPoolExecutor.CallerRunsPolicy())
             TracingMethodInvoker.SingleThreadTracingMethodInvoker(exec)
         },
+        val branchClassExcluder: BranchClassExcluder? = BranchClassExcluder.ByQualifiedClassNamePrefix(
+            "java.", "jdk.internal.", "jwp.fuzz.", "kotlin.", "scala.", "sun."
+        ),
+        val dictionary: List<ByteArray> = emptyList(),
         val tracer: Tracer = Tracer.JvmtiTracer()
     )
 
-    class TrackUniqueBranches(
-        val classPrefixesToIgnore: Array<String>? = arrayOf("java.", "sun.", "jdk.internal.")
-    ) : java.util.function.Function<CompletableFuture<ExecutionResult>, CompletableFuture<ExecutionResult>> {
+    @FunctionalInterface
+    interface BranchClassExcluder {
+        fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?): Boolean
 
-        private val _resultMap = HashMap<Int, ExecutionResult>()
-        val resultMap: Map<Int, ExecutionResult> get() = _resultMap
+        class ByQualifiedClassNamePrefix(vararg val prefixes: String) : BranchClassExcluder {
+            override fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?) =
+                fromClass != null && toClass != null &&
+                    prefixes.any { fromClass.name.startsWith(it) || toClass.name.startsWith(it) }
+        }
+    }
 
-        override fun apply(t: CompletableFuture<ExecutionResult>) = t.thenApply { origResult ->
-            var result = origResult
-            // Filter out ignored branches
-            if (classPrefixesToIgnore != null) {
-                fun invalidClass(cls: Class<*>?) = cls != null && classPrefixesToIgnore.any { cls.name.startsWith(it) }
-                result = result.copy(traceResult = result.traceResult.filtered(Predicate {
-                    !invalidClass(it.fromMethodDeclaringClass) && !invalidClass(it.toMethodDeclaringClass)
-                }))
-            }
-            _resultMap.putIfAbsent(result.traceResult.stableBranchesHash, result)
-            result
+    @FunctionalInterface
+    interface PostSubmissionHandler {
+        fun postSubmission(
+            conf: Fuzzer.Config,
+            future: CompletableFuture<ExecutionResult>
+        ): CompletableFuture<ExecutionResult>?
+
+        class TrackUniqueBranches : PostSubmissionHandler {
+            private val _results = LinkedHashMap<Int, ExecutionResult>()
+            val results: Map<Int, ExecutionResult> get() = _results
+
+            override fun postSubmission(
+                conf: Config,
+                future: CompletableFuture<ExecutionResult>
+            ) = future.thenApply { it.apply { _results.putIfAbsent(traceResult.stableBranchesHash, this) } }
         }
     }
 }

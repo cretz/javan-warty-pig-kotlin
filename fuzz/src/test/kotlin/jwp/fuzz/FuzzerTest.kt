@@ -1,5 +1,6 @@
 package jwp.fuzz
 
+import jwp.fuzztest.TestMethods
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
 import java.util.concurrent.ExecutorService
@@ -13,23 +14,25 @@ class FuzzerTest : TestBase() {
     @Test
     fun testSimpleFunction() {
         // Start a fuzzer while tracking unique branches
-        val uniqTracker = Fuzzer.TrackUniqueBranches()
+        val uniqTracker = Fuzzer.PostSubmissionHandler.TrackUniqueBranches()
         val fuzzer = Fuzzer(Fuzzer.Config(
+            // We use a separate class here to avoid the default "jwp.fuzz." branch exclusion
             mh = MethodHandles.lookup().findStatic(
-                javaClass,
-                "simpleFunction",
+                TestMethods::class.java,
+                "simpleMethod",
                 MethodType.methodType(String::class.java, Int::class.java, Boolean::class.java)
             ),
             // XXX: Needed because https://github.com/JetBrains/kotlin-native/issues/1234
             invoker = TracingMethodInvoker.SingleThreadTracingMethodInvoker(currentThreadExecutorService()),
-            onSubmission = uniqTracker
+            postSubmissionHandler = uniqTracker
         ))
         fuzzer.fuzz()
 
         // Check the branches that we expect...
-        val branches = uniqTracker.resultMap.values
+        val branches = uniqTracker.results.values
         if (debug) branches.forEach { result ->
-            println("Params ${result.params.toList()} ran on unique path and returned ${result.invokeResult}")
+            println("Params ${result.params.toList()} ran on unique path and returned ${result.invokeResult} " +
+                    "in ${result.nanoTime / 1000000}ms")
             println("Hash ${result.traceResult.stableBranchesHash}, branches:")
             result.traceResult.branchesWithResolvedMethods.forEach { println("  $it") }
         }
@@ -42,7 +45,13 @@ class FuzzerTest : TestBase() {
             })
         val whoCares = { _: Any -> true }
 
-        // Basically just validate the conditionals...
+        // Basically just validate the conditionals. Here is what the method looks like
+        //    public static String simpleMethod(int foo, boolean bar) {
+        //        if (foo == 2) return "two";
+        //        if (foo >= 5 && foo <= 7 && bar) return "five to seven and bar";
+        //        if (foo > 20 && !bar) return "over twenty and not bar";
+        //        return "something else";
+        //    }
         // Simple 2 check
         expectUnique({ it == 2 }, whoCares, "two")
         // In 5 to 7 and bar true
@@ -53,22 +62,12 @@ class FuzzerTest : TestBase() {
         expectUnique({ it > 20 }, { !it }, "over twenty and not bar")
         // What about over 20 and bar? That's technically a new branch...
         expectUnique({ it > 20 }, { it }, "something else")
-        // How about something that doesn't hit any of the branches? Technically range checks are two
-        // checks (less than and greater than), so we do less than 5 or greater than 7
+        // How about something that doesn't hit any of the branches? We need one that hits
+        // both parts of the 5 and 7 range check...
         expectUnique({ it != 2 && it < 5 && it < 20 }, whoCares, "something else")
         expectUnique({ it != 2 && it > 7 && it < 20 }, whoCares, "something else")
         // So...7 branches
         assertEquals(7, branches.size)
-    }
-
-    companion object {
-        @JvmStatic
-        fun simpleFunction(foo: Int, bar: Boolean): String {
-            if (foo == 2) return "two"
-            if (foo in 5..7 && bar) return "five to seven and bar"
-            if (foo > 20 && !bar) return "over twenty and not bar"
-            return "something else"
-        }
     }
 
     // XXX: Needed because https://github.com/JetBrains/kotlin-native/issues/1234

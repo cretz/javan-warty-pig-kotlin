@@ -1,30 +1,39 @@
 package jwp.fuzz
 
 import java.util.*
-import java.util.concurrent.BlockingQueue
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.collections.ArrayList
 import kotlin.coroutines.experimental.buildSequence
 import kotlin.experimental.inv
 
 // TODO: we know lots of bit twiddling math is wrong in here right now...we are just jotting down pseudocode
 // before we write the test cases
 
-class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConfig, Iterable<ByteArray> {
+open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConfig, Iterable<ByteArray> {
 
     // Sorted by shortest first
-    var dictionary = emptyArray<ByteArray>()
+    lateinit var dictionary: List<ByteArray> private set
+    lateinit var seenBranchesCache: Fuzzer.BranchesHashCache private set
+    lateinit var inputQueue: ByteArrayInputQueue private set
 
     override fun setFuzzerConfig(fuzzerConfig: Fuzzer.Config) {
-        dictionary = fuzzerConfig.dictionary.toTypedArray().apply { sortBy { it.size } }
+        dictionary = fuzzerConfig.dictionary.toTypedArray().apply { sortBy { it.size } }.toList()
+        seenBranchesCache = fuzzerConfig.branchesHashCacheSupplier.get()
+        inputQueue = fuzzerConfig.byteArrayInputQueueSupplier.get()
     }
-
-    val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
-    val queue: BlockingQueue<TestCase> = TODO()
 
     override fun onResult(result: ExecutionResult, myParamIndex: Int) {
-        TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        // If it's a unique path, then our param goes to the input queue (if it's not null)
+        if (seenBranchesCache.checkUniqueAndStore(result)) inputQueue.enqueue(TestCase(
+            result.params[myParamIndex] as? ByteArray ?: return,
+            result.traceResult.branchesWithResolvedMethods.map { it.stableHashCode },
+            result.nanoTime
+        ))
     }
-    override fun iterator(): Iterator<ByteArray> = TODO()
+
+    override fun iterator() = generateSequence { inputQueue.cullAndDequeue().bytes }.map(::stages).flatten().iterator()
 
     fun stages(buf: ByteArray) = sequenceOf(
         stageFlipBits(buf, 1),
@@ -49,7 +58,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                 set(byteIndex, get(byteIndex).flipBit((bitIndex + offset) % 8))
             }
         })
-    }
+    }.asIterable()
 
     fun stageFlipBytes(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
         for (byteIndex in 0 until (buf.size - (consecutiveToFlip - 1))) yield(buf.copyOf().apply {
@@ -57,7 +66,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                 set(byteIndex + offset, get(byteIndex + offset).inv())
             }
         })
-    }
+    }.asIterable()
 
     fun stageArith8(buf: ByteArray) = buildSequence {
         for (index in 0 until buf.size) {
@@ -69,7 +78,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                     yield(buf.copyOf().apply { set(index, (byte - j).toByte()) })
             }
         }
-    }
+    }.asIterable()
 
     fun stageArith16(buf: ByteArray) = buildSequence {
         for (index in 0 until buf.size - 1) {
@@ -90,7 +99,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                     yield(buf.copyOf().apply { putShortBe(index, (origBe - j).toShort()) })
             }
         }
-    }
+    }.asIterable()
 
     fun stageArith32(buf: ByteArray) = buildSequence {
         for (index in 0 until buf.size - 3) {
@@ -111,7 +120,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                     yield(buf.copyOf().apply { putIntBe(index, origBe - j) })
             }
         }
-    }
+    }.asIterable()
 
     fun stageInteresting8(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Byte, new: Int) = new >= orig - arithMax && new <= orig + arithMax
@@ -120,7 +129,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
             if (!couldBeArith(orig, byte) && !(orig.toInt() xor byte).couldBeBitFlip())
                 yield(buf.copyOf().apply { set(index, byte.toByte()) })
         }
-    }
+    }.asIterable()
 
     fun stageInteresting16(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Short, new: Int): Boolean {
@@ -152,7 +161,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                 yield(buf.copyOf().apply { putShortBe(index, short.toShort()) })
             }
         }
-    }
+    }.asIterable()
 
     fun stageInteresting32(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Int, new: Int): Boolean {
@@ -177,7 +186,7 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                 yield(buf.copyOf().apply { putIntBe(index, int) })
             }
         }
-    }
+    }.asIterable()
 
     fun stageDictionary(buf: ByteArray) = buildSequence {
         // To match AFL, we'll put different dictionary entries at an index before going on to the next index
@@ -188,13 +197,88 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
                 })
             }
         }
+    }.asIterable()
+
+    class TestCase(
+        val bytes: ByteArray,
+        val branchHashes: List<Int>?,
+        val nanoTime: Long?
+    ) : Comparable<TestCase> {
+        val score = if (nanoTime == null) null else bytes.size * nanoTime
+
+        override fun compareTo(other: TestCase) =
+            // Null score, meaning it hasn't run, is greater than other scores
+            if (score === other.score) 0
+            else if (score == null) 1
+            else if (other.score == null) -1
+            else score.compareTo(other.score)
+
+        companion object {
+            @JvmStatic
+            fun culled(cases: Iterable<TestCase>): List<TestCase> = cases.sorted().let { sorted ->
+                // We needed the cases sorted by score first
+                // Now, go over each, adding to favored for ones that have branches we haven't seen
+                val seenBranchHashes = HashSet<Int>(sorted.size)
+                val (favored, unfavored) = sorted.partition { testCase ->
+                    // Must have run and have branches we haven't seen yet to be favored
+                    testCase.branchHashes != null && seenBranchHashes.addAll(testCase.branchHashes)
+                }
+                favored + unfavored
+            }
+        }
+    }
+
+    // Must be thread safe in all ops
+    interface ByteArrayInputQueue {
+        // This should try to be unbounded, but should immediately throw if unable to enqueue
+        fun enqueue(testCase: TestCase)
+        // Implementations can and should time this out and throw a TimeoutException if waiting too long
+        fun cullAndDequeue(): TestCase
+
+        open class InMemory(val timeoutTime: Long, val timeoutUnit: TimeUnit) : ByteArrayInputQueue {
+            private var queue = ArrayList<TestCase>()
+            private val lock = ReentrantLock()
+            private var enqueuedSinceLastDequeued = false
+            private val notEmptyCond = lock.newCondition()
+
+            override fun enqueue(testCase: TestCase) {
+                lock.lock()
+                try {
+                    queue.add(testCase)
+                    enqueuedSinceLastDequeued = true
+                    notEmptyCond.signal()
+                } finally {
+                    lock.unlock()
+                }
+            }
+
+            override fun cullAndDequeue(): TestCase {
+                lock.lock()
+                try {
+                    // Wait for queue to not be empty
+                    while (queue.isEmpty()) {
+                        if (!notEmptyCond.await(timeoutTime, timeoutUnit)) throw TimeoutException()
+                    }
+                    // Cull if there have been some enqueued since
+                    if (enqueuedSinceLastDequeued) {
+                        enqueuedSinceLastDequeued = false
+                        TestCase.culled(queue).let { queue.clear(); queue.addAll(it) }
+                    }
+                    // Take the first one
+                    return queue.removeAt(0)
+                } finally {
+                    lock.unlock()
+                }
+            }
+        }
     }
 
     companion object {
         const val arithMax = 35
 
+        // Bit is 0 to 7 here
         @Suppress("NOTHING_TO_INLINE")
-        inline fun Byte.flipBit(bit: Int) = (toInt() xor (1 shl bit)).toByte()
+        internal inline fun Byte.flipBit(bit: Int) = (toInt() xor (1 shl bit)).toByte()
         @Suppress("NOTHING_TO_INLINE")
         inline infix fun Byte.xor(v: Int): Byte = (toInt() xor v).toByte()
 
@@ -263,8 +347,4 @@ class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConf
             return false
         }
     }
-
-    class TestCase(
-        val bytes: ByteArray
-    )
 }

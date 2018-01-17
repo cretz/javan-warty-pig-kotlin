@@ -2,13 +2,13 @@ package jwp.fuzz
 
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.WrongMethodTypeException
-import java.util.concurrent.ArrayBlockingQueue
+import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import java.util.function.Predicate
+import java.util.function.Supplier
 
-class Fuzzer(val conf: Config) {
+open class Fuzzer(val conf: Config) {
 
     fun fuzz() {
         // Just go over every param set, invoking...
@@ -54,14 +54,18 @@ class Fuzzer(val conf: Config) {
             "java.", "jdk.internal.", "jwp.fuzz.", "kotlin.", "scala.", "sun."
         ),
         val dictionary: List<ByteArray> = emptyList(),
-        val tracer: Tracer = Tracer.JvmtiTracer()
+        val tracer: Tracer = Tracer.JvmtiTracer(),
+        val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
+            Supplier { BranchesHashCache.InMemory() },
+        val byteArrayInputQueueSupplier: Supplier<ByteArrayProvider.ByteArrayInputQueue> =
+            Supplier { ByteArrayProvider.ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) }
     )
 
     @FunctionalInterface
     interface BranchClassExcluder {
         fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?): Boolean
 
-        class ByQualifiedClassNamePrefix(vararg val prefixes: String) : BranchClassExcluder {
+        open class ByQualifiedClassNamePrefix(vararg val prefixes: String) : BranchClassExcluder {
             override fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?) =
                 fromClass != null && toClass != null &&
                     prefixes.any { fromClass.name.startsWith(it) || toClass.name.startsWith(it) }
@@ -75,7 +79,7 @@ class Fuzzer(val conf: Config) {
             future: CompletableFuture<ExecutionResult>
         ): CompletableFuture<ExecutionResult>?
 
-        class TrackUniqueBranches : PostSubmissionHandler {
+        open class TrackUniqueBranches : PostSubmissionHandler {
             private val _uniqueBranchResults = LinkedHashMap<Int, ExecutionResult>()
             val uniqueBranchResults: Collection<ExecutionResult> get() = _uniqueBranchResults.values
 
@@ -89,6 +93,18 @@ class Fuzzer(val conf: Config) {
                 _totalExecutions++
                 it.apply { _uniqueBranchResults.putIfAbsent(traceResult.stableBranchesHash, this) }
             }
+        }
+    }
+
+    @FunctionalInterface
+    interface BranchesHashCache {
+        // Must be thread safe. Return true if unique.
+        fun checkUniqueAndStore(result: ExecutionResult): Boolean
+
+        open class InMemory : BranchesHashCache {
+            val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+            override fun checkUniqueAndStore(result: ExecutionResult) =
+                seenBranchHashes.add(result.traceResult.stableBranchesHash)
         }
     }
 }

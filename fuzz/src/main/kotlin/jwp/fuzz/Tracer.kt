@@ -8,7 +8,7 @@ interface Tracer {
     // checking it at runtime.
     fun stopTrace(thread: Thread?): TraceResult
 
-    class JvmtiTracer : Tracer {
+    open class JvmtiTracer : Tracer {
         override fun startTrace(thread: Thread?) = JavaUtils.startJvmtiTrace(thread)
 
         override fun stopTrace(thread: Thread?): TraceResult {

@@ -77,6 +77,7 @@ object TypeGen {
     interface WithFeedback {
         fun onResult(result: ExecutionResult, myParamIndex: Int)
     }
+
     abstract class WithFeedbackIterable<T>(val iter: Iterable<T>) : Iterable<T> {
         override fun iterator() = iter.iterator()
     }

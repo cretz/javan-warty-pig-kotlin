@@ -42,10 +42,10 @@ object TypeGen {
     val allByte by lazy { (-128..127).toList() }
 
     val interestingByte by lazy {
-        listOf(-128, -1, 0, 1, 16, 32, 64, 100, 127)
+        listOf<Byte>(-128, -1, 0, 1, 16, 32, 64, 100, 127)
     }
     val interestingShort by lazy {
-        listOf(-32768, -129, 128, 255, 256, 512, 1000, 1024, 4096, 32767)
+        listOf<Short>(-32768, -129, 128, 255, 256, 512, 1000, 1024, 4096, 32767)
     }
     val interestingInt by lazy {
         listOf(Int.MIN_VALUE, -100663046, -32769, 32768, 65535, 65536, 100663045, Int.MAX_VALUE)
@@ -67,12 +67,12 @@ object TypeGen {
 
     val suggestedBoolean by lazy { allBool }
     val suggestedChar: Iterable<Char> get() = TODO()
-    val suggestedByte by lazy { suggestedIntSimpleRange cat interestingByte }
-    val suggestedShort by lazy { suggestedByte cat interestingShort }
-    val suggestedInt by lazy { suggestedShort cat interestingInt }
-    val suggestedLong by lazy { suggestedInt.map { it.toLong() } cat interestingLong }
+    val suggestedByte by lazy { suggestedIntSimpleRange.map(Int::toByte) cat interestingByte }
+    val suggestedShort by lazy { suggestedByte.map(Byte::toShort) cat interestingShort }
+    val suggestedInt by lazy { suggestedShort.map(Short::toInt) cat interestingInt }
+    val suggestedLong by lazy { suggestedInt.map(Int::toLong) cat interestingLong }
     val suggestedFloat by lazy { suggestedFloatSimpleRange cat interestingFloat }
-    val suggestedDouble by lazy { suggestedFloat.map { it.toDouble() } cat interestingDouble }
+    val suggestedDouble by lazy { suggestedFloat.map(Float::toDouble) cat interestingDouble }
 
     interface WithFeedback {
         fun onResult(result: ExecutionResult, myParamIndex: Int)

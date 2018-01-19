@@ -13,12 +13,12 @@ import kotlin.coroutines.experimental.buildSequence
 open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConfig, Iterable<ByteArray> {
 
     // Sorted by shortest first
-    lateinit var dictionary: List<ByteArray> internal set
+    lateinit var userDictionary: List<ByteArray> internal set
     lateinit var seenBranchesCache: Fuzzer.BranchesHashCache internal set
     lateinit var inputQueue: ByteArrayInputQueue internal set
 
     override fun setFuzzerConfig(fuzzerConfig: Fuzzer.Config) {
-        dictionary = fuzzerConfig.dictionary.toTypedArray().apply { sortBy { it.size } }.toList()
+        userDictionary = fuzzerConfig.dictionary.toTypedArray().apply { sortBy { it.size } }.toList()
         seenBranchesCache = fuzzerConfig.branchesHashCacheSupplier.get()
         inputQueue = fuzzerConfig.byteArrayInputQueueSupplier.get()
     }
@@ -47,7 +47,7 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
         stageInteresting8(buf),
         stageInteresting16(buf),
         stageInteresting32(buf),
-        stageDictionary(buf)
+        stageDictionary(buf, userDictionary)
     ).flatten().asIterable()
 
     open fun stageFlipBits(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
@@ -73,35 +73,38 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
     }.asIterable()
 
     open fun stageArith16(buf: ByteArray) = buildSequence {
-        for (index in 0 until buf.size - 1) {
+        fun affectsBothBytes(orig: Short, new: Short) =
+            orig.byte0 != new.byte0 && orig.byte1 != new.byte1
+        for (index in 0 until 1) {//buf.size - 1) {
             val origLe = buf.getShortLe(index)
             val origBe = buf.getShortBe(index)
             arithValsToAdd.forEach {
-                val newLe = origLe + it
-                if (newLe in Short.MIN_VALUE..Short.MAX_VALUE &&
-                        !origLe.couldHaveBitFlippedTo(newLe.toShort()))
-                    yield(buf.copyAnd { putShortLe(index, newLe.toShort()) })
-                val newBe = origBe + it
-                if (newBe in Short.MIN_VALUE..Short.MAX_VALUE &&
-                        !origLe.couldHaveBitFlippedTo(newBe.toShort().endianSwapped))
-                    yield(buf.copyAnd { putShortBe(index, newBe.toShort()) })
+                val newLe = (origLe + it).toShort()
+                if (affectsBothBytes(origLe, newLe) && !origLe.couldHaveBitFlippedTo(newLe))
+                    yield(buf.copyAnd { putShortLe(index, newLe) })
+                val newBe = (origBe + it).toShort()
+                if (affectsBothBytes(origBe, newBe) && !origLe.couldHaveBitFlippedTo(newBe.endianSwapped))
+                    yield(buf.copyAnd { putShortBe(index, newBe) })
             }
         }
     }.asIterable()
 
     open fun stageArith32(buf: ByteArray) = buildSequence {
+        fun affectsMoreThanTwoBytes(orig: Int, new: Int) =
+            (if (orig.byte0 != new.byte0) 1 else 0) +
+            (if (orig.byte1 != new.byte1) 1 else 0) +
+            (if (orig.byte2 != new.byte2) 1 else 0) +
+            (if (orig.byte3 != new.byte3) 1 else 0) > 2
         for (index in 0 until buf.size - 3) {
             val origLe = buf.getIntLe(index)
             val origBe = buf.getIntBe(index)
             arithValsToAdd.forEach {
-                val newLe = origLe + it.toLong()
-                if (newLe in Int.MIN_VALUE..Int.MAX_VALUE &&
-                        !origLe.couldHaveBitFlippedTo(newLe.toInt()))
-                    yield(buf.copyAnd { putIntLe(index, newLe.toInt()) })
-                val newBe = origBe + it.toLong()
-                if (newBe in Int.MIN_VALUE..Int.MAX_VALUE &&
-                        !origLe.couldHaveBitFlippedTo(newBe.toInt().endianSwapped))
-                    yield(buf.copyAnd { putIntBe(index, newBe.toInt()) })
+                val newLe = origLe + it
+                if (affectsMoreThanTwoBytes(origLe, newLe) && !origLe.couldHaveBitFlippedTo(newLe))
+                    yield(buf.copyAnd { putIntLe(index, newLe) })
+                val newBe = origBe + it
+                if (affectsMoreThanTwoBytes(origBe, newBe) && !origLe.couldHaveBitFlippedTo(newBe.endianSwapped))
+                    yield(buf.copyAnd { putIntBe(index, newBe) })
             }
         }
     }.asIterable()
@@ -140,10 +143,17 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
 
     open fun stageInteresting32(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Int, new: Int): Boolean {
-            val origBe = orig.endianSwapped
-            // Casting toLong to prevent overflow on checks
-            return (new >= orig - arithMax.toLong() && new <= orig + arithMax.toLong()) ||
-                (new >= origBe - arithMax.toLong() && new <= origBe + arithMax.toLong())
+            val origArr = orig.toByteArray()
+            val newArr = new.toByteArray()
+            fun byteArith(index: Int) = (0 until 4).all {
+                (it == index && newArr[it] - origArr[it] in (-arithMax)..arithMax) || origArr[it] == newArr[it]
+            }
+            fun shortArith(index: Int) = (0 until 4).all {
+                it == index + 1 ||
+                (it == index && newArr.getShortLe(it) - origArr.getShortLe(it) in (-arithMax)..arithMax) ||
+                origArr[it] == newArr[it]
+            }
+            return (0 until 4).any { byteArith(it) || (it < 3 && shortArith(it)) }
         }
         fun couldBeInteresting8(orig: Int, new: Int) = TypeGen.interestingByte.any {
             (it == new.byte0 && orig.byte1 == new.byte1 && orig.byte2 == new.byte2 && orig.byte3 == new.byte3) ||
@@ -176,14 +186,14 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
             val intBe = int.endianSwapped
             if (!couldBeArith(origBe, intBe) && !couldBeInteresting8(origLe, intBe) &&
                     !couldBeInteresting16(origLe, intBe) && !origLe.couldHaveBitFlippedTo(intBe))
-                yield(buf.copyAnd { putIntBe(index, int) })
+                yield(buf.copyAnd { putIntBe(index, intBe) })
         }
     }.asIterable()
 
-    open fun stageDictionary(buf: ByteArray) = buildSequence {
+    open fun stageDictionary(buf: ByteArray, sortedDictionary: List<ByteArray>) = buildSequence {
         // To match AFL, we'll put different dictionary entries at an index before going on to the next index
-        for (index in 0 until buf.size) {
-            for (entry in dictionary) {
+        if (sortedDictionary.isNotEmpty()) for (index in 0 until buf.size) {
+            for (entry in sortedDictionary) {
                 if (index + entry.size < buf.size) yield(buf.copyOf().apply {
                     for (i in 0 until entry.size) set(index + i, entry[i])
                 })
@@ -267,7 +277,6 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
 
     companion object {
         const val arithMax = 35
-
         val arithValsToAdd = (1..arithMax).flatMap { listOf(it, -it) }
     }
 }

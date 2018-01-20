@@ -1,8 +1,16 @@
 package jwp.fuzz
 
+import java.math.BigInteger
+import java.util.*
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.experimental.inv
 
 // By alphabetical order of type, then val/fun name
+
+fun AtomicReference<BigInteger>.plusAssign(v: Int) = plusAssign(v.toBigInteger())
+fun AtomicReference<BigInteger>.plusAssign(v: Long) = plusAssign(v.toBigInteger())
+fun AtomicReference<BigInteger>.plusAssign(v: BigInteger): Unit { addAndGet(v) }
+fun AtomicReference<BigInteger>.addAndGet(v: BigInteger) = accumulateAndGet(v, BigInteger::add)
 
 val Byte.binaryString get() = "%8s".format(unsigned.toString(2)).replace(' ', '0')
 fun Byte.couldHaveBitFlippedTo(vararg new: Byte): Boolean =
@@ -67,6 +75,13 @@ fun ByteArray.putShortLe(index: Int, v: Short) {
     set(index, v.byte0)
     set(index + 1, v.byte1)
 }
+fun ByteArray.remove(start: Int, amount: Int): ByteArray {
+    require(amount < size)
+    val newArr = ByteArray(size - amount)
+    System.arraycopy(this, 0, newArr, 0, start)
+    System.arraycopy(this, start + amount, newArr, start, newArr.size - start)
+    return newArr
+}
 
 val Int.binaryString get() = "%32s".format(unsigned.toString(2)).replace(' ', '0')
 val Int.byte0 inline get() = toByte()
@@ -83,6 +98,8 @@ fun Int.Companion.fromBytes(byte0: Byte, byte1: Byte, byte2: Byte, byte3: Byte) 
         ((byte2.toInt() and 0xFF) shl 16) or
         ((byte1.toInt() and 0xFF) shl 8) or
         ((byte0.toInt() and 0xFF))
+
+fun <T> List<T>.randItem(rand: Random) = get(rand.nextInt(size))
 
 val Short.binaryString get() = "%16s".format(unsigned.toString(2)).replace(' ', '0')
 val Short.byte0 inline get() = toByte()

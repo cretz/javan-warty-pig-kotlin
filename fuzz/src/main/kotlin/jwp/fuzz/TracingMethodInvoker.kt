@@ -5,6 +5,8 @@ import java.util.concurrent.*
 import java.util.function.Supplier
 
 abstract class TracingMethodInvoker {
+    // Note, some params may be ParamGen.ParamRef. They need to be deref'd to call the method,
+    // but put in the execution result as they were passed in.
     abstract fun invoke(conf: Config, vararg params: Any?): CompletableFuture<ExecutionResult>
 
     abstract fun shutdownAndWaitUntilComplete(timeout: Long, timeUnit: TimeUnit): Boolean
@@ -16,8 +18,9 @@ abstract class TracingMethodInvoker {
 
     open class ExecutorServiceInvoker(val exec: ExecutorService) : TracingMethodInvoker() {
         override fun invoke(conf: Config, vararg params: Any?) = CompletableFuture.supplyAsync(Supplier {
+            val actualParams = params.map { if (it is ParamGen.ParamRef<*>) it.value else it }.toTypedArray()
             val beginNs = System.nanoTime()
-            val traceComplete = JavaUtils.invokeTraced(conf.tracer, conf.mh, *params)
+            val traceComplete = JavaUtils.invokeTraced(conf.tracer, conf.mh, *actualParams)
             val endNs = System.nanoTime()
             val invokeResult =
                 if (traceComplete.exception == null) ExecutionResult.InvokeResult.Ok(traceComplete.result)

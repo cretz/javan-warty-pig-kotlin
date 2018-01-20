@@ -1,5 +1,6 @@
 package jwp.fuzz
 
+import java.math.BigInteger
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -7,23 +8,32 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.locks.ReentrantLock
 import java.util.function.Supplier
 import kotlin.coroutines.experimental.buildSequence
+import kotlin.math.min
 
-open class ByteArrayParamGen(
-    val dictionary: List<ByteArray> = emptyList(),
-    val seenBranchesCache: BranchesHashCache = BranchesHashCache.InMemory(),
-    val inputQueue: ByteArrayInputQueue = ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES)
-) : ParamGen<ByteArray>, ParamGen.WithFeedback {
-
-    constructor(conf: Config) : this(
-        conf.dictionary,
-        conf.branchesHashCacheSupplier.get(),
-        conf.byteArrayInputQueueSupplier.get()
-    )
+open class ByteArrayParamGen(val conf: Config = Config()) :
+        ParamGen<ByteArrayParamGen.ByteArrayParam>, ParamGen.WithFeedback {
 
     // Sorted by shortest first
-    val userDictionary = dictionary.sortedBy { it.size }
+    val userDictionary = conf.dictionary.sortedBy { it.size }
+    val seenBranchesCache = conf.branchesHashCacheSupplier.get()
+    val inputQueue = conf.byteArrayInputQueueSupplier.get()
+    val arithMax = conf.arithMax
+    val arithValsToAdd = (1..arithMax).flatMap { listOf(it, -it) }
+
+    private val varMutex = Object()
+    private var totalNanoTime = BigInteger.ZERO
+    private var totalBranchCount = BigInteger.ZERO
+    private var resultCount = BigInteger.ZERO
+    private var queueCycle = BigInteger.ZERO
+    private var startMs = -1L
 
     override fun onResult(result: ExecutionResult, myParamIndex: Int) {
+        synchronized(varMutex) {
+            totalNanoTime += result.nanoTime.toBigInteger()
+            totalBranchCount += result.traceResult.branchesWithResolvedMethods.size.toBigInteger()
+            resultCount++
+        }
+        (result.params[myParamIndex] as? ByteArrayParam)?.entry?.applyResult(result)
         // If it's a unique path, then our param goes to the input queue (if it's not null)
         if (seenBranchesCache.checkUniqueAndStore(result)) inputQueue.enqueue(TestCase(
             result.params[myParamIndex] as? ByteArray ?: return,
@@ -32,23 +42,33 @@ open class ByteArrayParamGen(
         ))
     }
 
-    override fun iterator() = generateSequence { inputQueue.cullAndDequeue().bytes }.map(::stages).flatten().iterator()
+    override fun iterator() =
+        generateSequence { inputQueue.cullAndDequeue() }.map(::stages).flatten().iterator()
 
-    open fun stages(buf: ByteArray) = sequenceOf(
-        stageFlipBits(buf, 1),
-        stageFlipBits(buf, 2),
-        stageFlipBits(buf, 4),
-        stageFlipBytes(buf, 1),
-        stageFlipBytes(buf, 2),
-        stageFlipBytes(buf, 4),
-        stageArith8(buf),
-        stageArith16(buf),
-        stageArith32(buf),
-        stageInteresting8(buf),
-        stageInteresting16(buf),
-        stageInteresting32(buf),
-        stageDictionary(buf, userDictionary)
-    ).flatten().asIterable()
+    open fun stages(entry: QueueEntry): Iterable<ByteArrayParam> {
+        synchronized(varMutex) {
+            queueCycle++
+            if (startMs < 0) startMs = System.currentTimeMillis()
+        }
+        return sequenceOf(
+            stageFlipBits(entry.bytes, 1),
+            stageFlipBits(entry.bytes, 2),
+            stageFlipBits(entry.bytes, 4),
+            stageFlipBytes(entry.bytes, 1),
+            stageFlipBytes(entry.bytes, 2),
+            stageFlipBytes(entry.bytes, 4),
+            stageArith8(entry.bytes),
+            stageArith16(entry.bytes),
+            stageArith32(entry.bytes),
+            stageInteresting8(entry.bytes),
+            stageInteresting16(entry.bytes),
+            stageInteresting32(entry.bytes),
+            stageDictionary(entry.bytes, userDictionary),
+            // TODO: user extras
+            stageHavoc(entry.bytes)
+            // TODO: splices
+        ).flatten().map { ByteArrayParam(it, entry) }.asIterable()
+    }
 
     open fun stageFlipBits(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
         for (bitIndex in 0 until ((buf.size * 8) - (consecutiveToFlip - 1))) yield(buf.copyAnd {
@@ -201,13 +221,73 @@ open class ByteArrayParamGen(
         }
     }.asIterable()
 
+    open fun stageHavoc(buf: ByteArray) = buildSequence {
+        // TODO: base havoc cycles on perf
+        for (stageCur in 0 until conf.havocCycles) {
+            var bytes = buf.copyOf()
+            for (i in 0 until 2.toBigInteger().pow(1 + conf.rand.nextInt(conf.havocStackPower)).toInt()) {
+                bytes = conf.havocTweaks.randItem(conf.rand).tweak(this@ByteArrayParamGen, bytes)
+            }
+            yield(bytes)
+        }
+    }.asIterable()
+
+    open fun chooseBlockLen(limit: Int): Int {
+        val rLim = synchronized(varMutex) {
+            val over10Min = startMs > 0 && System.currentTimeMillis() - startMs > 10 * 60 * 1000
+            if (over10Min) queueCycle.min(3.toBigInteger()).toInt() else 1
+        }
+        var (minValue, maxValue) = when (conf.rand.nextInt(rLim)) {
+            0 -> 1 to conf.havocBlockSmall
+            1 -> conf.havocBlockSmall to conf.havocBlockMedium
+            else -> when (conf.rand.nextInt(10)) {
+                0 -> conf.havocBlockLarge to conf.havocBlockXLarge
+                else -> conf.havocBlockMedium to conf.havocBlockLarge
+            }
+        }
+        if (minValue >= limit) minValue = 1
+        return minValue + conf.rand.nextInt(min(maxValue, limit) - minValue + 1)
+    }
+
     data class Config(
         val dictionary: List<ByteArray> = emptyList(),
         val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
             Supplier { BranchesHashCache.InMemory() },
         val byteArrayInputQueueSupplier: Supplier<ByteArrayInputQueue> =
-            Supplier { ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) }
+            Supplier { ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) },
+        val havocTweaks: List<Havoc.Tweak> = Havoc.suggestedTweaks,
+        val rand: Random = Random(),
+        val arithMax: Int = 35,
+        val havocCycles: Int = 1024,
+        val havocStackPower: Int = 7,
+        val havocBlockSmall: Int = 32,
+        val havocBlockMedium: Int = 128,
+        val havocBlockLarge: Int = 1500,
+        val havocBlockXLarge: Int = 32768,
+        val maxInput: Int = 1 * 1024 * 1024
     )
+
+    class ByteArrayParam(override val value: ByteArray, val entry: QueueEntry) : ParamGen.ParamRef<ByteArray>
+
+    class QueueEntry(
+        val bytes: ByteArray,
+        val dequeuedIndex: Long
+    ) {
+        private val varMutex = Object()
+        private var totalNanoTime = 0L
+        private var totalBranchCount = 0L
+        private var resultCount = 0L
+
+        fun applyResult(result: ExecutionResult) {
+            synchronized(varMutex) {
+                totalNanoTime += result.nanoTime
+                totalBranchCount += result.traceResult.branchesWithResolvedMethods.size
+                resultCount++
+            }
+        }
+
+        fun calculateScore(): Double = TODO()
+    }
 
     class TestCase(
         val bytes: ByteArray,
@@ -255,13 +335,14 @@ open class ByteArrayParamGen(
         // This should try to be unbounded, but should immediately throw if unable to enqueue
         fun enqueue(testCase: TestCase)
         // Implementations can and should time this out and throw a TimeoutException if waiting too long
-        fun cullAndDequeue(): TestCase
+        fun cullAndDequeue(): QueueEntry
 
         open class InMemory(val timeoutTime: Long, val timeoutUnit: TimeUnit) : ByteArrayInputQueue {
             protected var queue = ArrayList<TestCase>()
             protected val lock = ReentrantLock()
             protected var enqueuedSinceLastDequeued = false
             protected val notEmptyCond = lock.newCondition()
+            protected var queueCounter = 0L
 
             override fun enqueue(testCase: TestCase) {
                 lock.lock()
@@ -274,7 +355,7 @@ open class ByteArrayParamGen(
                 }
             }
 
-            override fun cullAndDequeue(): TestCase {
+            override fun cullAndDequeue(): QueueEntry {
                 lock.lock()
                 try {
                     // Wait for queue to not be empty
@@ -287,7 +368,7 @@ open class ByteArrayParamGen(
                         TestCase.culled(queue).let { queue.clear(); queue.addAll(it) }
                     }
                     // Take the first one
-                    return queue.removeAt(0)
+                    return QueueEntry(queue.removeAt(0).bytes, queueCounter++)
                 } finally {
                     lock.unlock()
                 }
@@ -295,8 +376,118 @@ open class ByteArrayParamGen(
         }
     }
 
-    companion object {
-        const val arithMax = 35
-        val arithValsToAdd = (1..arithMax).flatMap { listOf(it, -it) }
+    object Havoc {
+
+        private fun tweakMut(fn: ByteArrayParamGen.(ByteArray) -> ByteArray) = object : Tweak {
+            override fun tweak(gen: ByteArrayParamGen, bytes: ByteArray) = fn(gen, bytes)
+        }
+
+        private fun tweak(fn: ByteArrayParamGen.(ByteArray) -> Unit) = tweakMut { fn(it); it }
+
+        private fun tweakRandomByte(fn: ByteArrayParamGen.(Byte) -> Byte) = tweak {
+            val index = conf.rand.nextInt(it.size)
+            it[index] = fn(this, it[index])
+        }
+        private fun tweakRandomShort(fn: ByteArrayParamGen.(Short) -> Short) = tweak {
+            if (it.size >= 2) {
+                val index = conf.rand.nextInt(it.size - 1)
+                if (conf.rand.nextBoolean()) it.putShortLe(index, fn(it.getShortLe(index)))
+                else it.putShortBe(index, fn(it.getShortBe(index)))
+            }
+        }
+        private fun tweakRandomInt(fn: ByteArrayParamGen.(Int) -> Int) = tweak {
+            if (it.size >= 4) {
+                val index = conf.rand.nextInt(it.size - 3)
+                if (conf.rand.nextBoolean()) it.putIntLe(index, fn(it.getIntLe(index)))
+                else it.putIntBe(index, fn(it.getIntBe(index)))
+            }
+        }
+
+        val flipSingleBit get() = tweak { it.flipBit(conf.rand.nextInt(it.size * 8)) }
+        val interestingByte get() = tweakRandomByte { ParamGen.interestingByte.randItem(conf.rand) }
+        val interestingShort get() = tweakRandomShort {ParamGen.interestingShort.randItem(conf.rand) }
+        val interestingInt get() = tweakRandomInt { ParamGen.interestingInt.randItem(conf.rand) }
+        val subtractFromByte get() = tweakRandomByte { (it - (1 + conf.rand.nextInt(arithMax))).toByte() }
+        val addToByte get() = tweakRandomByte { (it + (1 + conf.rand.nextInt(arithMax))).toByte() }
+        val subtractFromShort get() = tweakRandomShort { (it - (1 + conf.rand.nextInt(arithMax))).toShort() }
+        val addToShort get() = tweakRandomShort { (it + (1 + conf.rand.nextInt(arithMax))).toShort() }
+        val subtractFromInt get() = tweakRandomInt { it - (1 + conf.rand.nextInt(arithMax)) }
+        val addToInt get() = tweakRandomInt { it + (1 + conf.rand.nextInt(arithMax)) }
+        val randomByte get() = tweakRandomByte {
+            while (true) {
+                val b = (conf.rand.nextInt(256) - 128).toByte()
+                if (it != b) return@tweakRandomByte b
+            }
+            // XXX: https://youtrack.jetbrains.com/issue/KT-22404
+            @Suppress("UNREACHABLE_CODE")
+            -1
+        }
+        val deleteBytes get() = tweakMut {
+            if (it.size < 2) it else {
+                val delLen = chooseBlockLen(it.size - 1)
+                val delFrom = conf.rand.nextInt(it.size - delLen + 1)
+                it.remove(delFrom, delLen)
+            }
+        }
+        val cloneOrInsertBytes get() = tweakMut {
+            if (it.size + conf.havocBlockXLarge >= conf.maxInput) it else {
+                val actuallyClone = conf.rand.nextInt(4) > 0
+                val (cloneLen, cloneFrom) =
+                    if (actuallyClone) chooseBlockLen(it.size).let { bl -> bl to conf.rand.nextInt(it.size - bl + 1) }
+                    else chooseBlockLen(conf.havocBlockXLarge) to 0
+                val cloneTo = conf.rand.nextInt(it.size)
+                val newArr = ByteArray(it.size + cloneLen)
+                System.arraycopy(it, 0, newArr, 0, cloneTo)
+                /*              memset(new_buf + clone_to,
+                     UR(2) ? UR(256) : out_buf[UR(temp_len)], clone_len);*/
+                if (actuallyClone) System.arraycopy(it, cloneFrom, newArr, cloneTo, cloneLen)
+                else newArr.fill(
+                    if (conf.rand.nextBoolean()) (conf.rand.nextInt(256) - 128).toByte()
+                    else it[conf.rand.nextInt(it.size)],
+                    cloneTo, cloneTo + cloneLen
+                )
+                System.arraycopy(it, cloneTo, newArr, cloneTo + cloneLen, it.size - cloneTo)
+                newArr
+            }
+        }
+        val overwriteRandomOrFixedBytes get() = tweak {
+            if (it.size >= 2) {
+                val copyLen = chooseBlockLen(it.size - 1)
+                val copyFrom = conf.rand.nextInt(it.size - copyLen + 1)
+                val copyTo = conf.rand.nextInt(it.size - copyLen + 1)
+                if (conf.rand.nextInt(4) > 0) {
+                    if (copyFrom != copyTo) System.arraycopy(it, copyFrom, it, copyTo, copyLen)
+                } else it.fill(
+                    if (conf.rand.nextBoolean()) (conf.rand.nextInt(256) - 128).toByte()
+                    else it[conf.rand.nextInt(it.size)],
+                    copyTo, copyLen
+                )
+            }
+        }
+
+        // TODO: dictionary-based tweaks
+
+        val suggestedTweaks get() = listOf(
+            flipSingleBit,
+            interestingByte,
+            interestingShort,
+            interestingInt,
+            subtractFromByte,
+            addToByte,
+            subtractFromShort,
+            addToShort,
+            subtractFromInt,
+            addToInt,
+            randomByte,
+            deleteBytes,
+            deleteBytes,
+            cloneOrInsertBytes,
+            overwriteRandomOrFixedBytes
+        )
+
+        @FunctionalInterface
+        interface Tweak {
+            fun tweak(gen: ByteArrayParamGen, bytes: ByteArray): ByteArray
+        }
     }
 }

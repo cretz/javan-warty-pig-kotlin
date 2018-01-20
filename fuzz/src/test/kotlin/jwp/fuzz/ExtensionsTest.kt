@@ -2,7 +2,7 @@ package jwp.fuzz
 
 import kotlin.test.Test
 
-class ByteUtilTest : TestBase() {
+class ExtensionsTest : TestBase() {
 
     @Test
     fun testFlipBit() {
@@ -56,5 +56,13 @@ class ByteUtilTest : TestBase() {
             testInt(it)
             if (it != Int.MAX_VALUE) testInt(it + 1)
         }
+    }
+
+    @Test
+    fun testByteArrayRemove() {
+        assertEquals(
+            listOf<Byte>(0, 1, 5, 6),
+            byteArrayOf(0, 1, 2, 3, 4, 5, 6).remove(2, 3).toList()
+        )
     }
 }

@@ -6,7 +6,7 @@ import kotlin.streams.asStream
 
 abstract class TraceResult {
 
-    abstract val branchesWithResolvedMethods: Iterable<BranchWithResolvedMethods>
+    abstract val branchesWithResolvedMethods: List<BranchWithResolvedMethods>
 
     val stableBranchesHash: Int by lazy {
         // Sort the branches, hash each, then hash all together

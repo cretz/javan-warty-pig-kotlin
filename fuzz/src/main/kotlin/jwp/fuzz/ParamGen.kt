@@ -10,8 +10,8 @@ interface ParamGen<T> : Iterable<T> {
     companion object {
         val singleNull get() = Simple(listOf(null))
         val allBool get() = Simple(listOf(true, false))
-        val allByte get() = Simple(-128..127)
-        fun <T : Enum<T>> allEnums(cls: Class<T>) = Simple(cls.enumConstants.asIterable())
+        val allByte get() = Simple(((-128)..127).toList())
+        fun <T : Enum<T>> allEnums(cls: Class<T>) = Simple(cls.enumConstants.toList())
 
         val interestingByte get() =
             Simple(listOf<Byte>(-128, -1, 0, 1, 16, 32, 64, 100, 127))
@@ -28,7 +28,7 @@ interface ParamGen<T> : Iterable<T> {
             Simple(listOf(java.lang.Double.MIN_NORMAL, Double.MIN_VALUE, Double.MAX_VALUE,
                 Double.NEGATIVE_INFINITY, Double.POSITIVE_INFINITY, Double.NaN))
 
-        val suggestedIntSimpleRange get() = Simple(-35..35)
+        val suggestedIntSimpleRange get() = Simple((-35..35).toList())
         val suggestedFloatSimpleRange get() = Simple(suggestedIntSimpleRange.map(Int::toFloat))
 
         val suggestedBoolean get() = allBool
@@ -78,11 +78,11 @@ interface ParamGen<T> : Iterable<T> {
         fun suggestedByteArray(conf: ByteArrayParamGen.Config) = ByteArrayParamGen(conf)
 
         @Suppress("UNCHECKED_CAST")
-        fun <T> suggested(cls: Class<T>, conf: Config = Config()): ParamGen<T> = (
+        fun suggested(cls: Class<*>, conf: Config = Config()): ParamGen<*> = (
             suggestedFixedClass[cls]?.get() ?:
                 suggestedConfClass[cls]?.apply(conf) ?:
                 error("No suggested param gen found for class $cls")
-        ) as ParamGen<T>
+        )
     }
 
     data class Config(
@@ -96,7 +96,9 @@ interface ParamGen<T> : Iterable<T> {
         fun onResult(result: ExecutionResult, myParamIndex: Int)
     }
 
-    open class Simple<T>(val iterable: Iterable<T>) : ParamGen<T> {
-        override fun iterator() = iterable.iterator()
+    open class Simple<T>(list: List<T>) : ParamGen<T>, List<T> by list
+
+    interface ParamRef<T> {
+        val value: T?
     }
 }

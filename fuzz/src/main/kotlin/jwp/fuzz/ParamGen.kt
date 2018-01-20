@@ -1,7 +1,8 @@
 package jwp.fuzz
 
-import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.*
 import java.util.function.Function
 import java.util.function.Supplier
 
@@ -70,12 +71,20 @@ interface ParamGen<T> : Iterable<T> {
             )
         }
 
-        fun suggestedString(conf: Config): ParamGen<String> =
-            // TODO: maybe accept charset to go from byte array?
-            TODO()
-
         fun suggestedByteArray(conf: Config) = suggestedByteArray(conf.byteArrayConfig)
         fun suggestedByteArray(conf: ByteArrayParamGen.Config) = ByteArrayParamGen(conf)
+
+        fun suggestedByteBuffer(conf: Config) =
+            suggestedByteArray(conf).lazyMapParamGen { it.map { ByteBuffer.wrap(it) } }
+
+        fun suggestedCharBuffer(conf: Config) = conf.stringCharset.newDecoder().
+                onMalformedInput(CodingErrorAction.REPLACE).onUnmappableCharacter(CodingErrorAction.REPLACE).let { cd ->
+            suggestedByteBuffer(conf).lazyMapNotNullParamGen {
+                try { it.map(cd::decode) } catch (e: CharacterCodingException) { null }
+            }
+        }
+
+        fun suggestedString(conf: Config) = suggestedCharBuffer(conf).lazyMapParamGen { it.map(CharBuffer::toString) }
 
         @Suppress("UNCHECKED_CAST")
         fun suggested(cls: Class<*>, conf: Config = Config()): ParamGen<*> = (
@@ -83,6 +92,25 @@ interface ParamGen<T> : Iterable<T> {
                 suggestedConfClass[cls]?.apply(conf) ?:
                 error("No suggested param gen found for class $cls")
         )
+
+        @Suppress("UNCHECKED_CAST")
+        fun <T, R> lazyMapParamGen(gen: ParamGen<T>, fn: Function<T, R>): ParamGen<R> {
+            val newGen = object : ParamGen<R> { override fun iterator() = gen.lazyMap(fn::apply).iterator() }
+            if (gen is WithFeedback) return object : ParamGen<R> by newGen, WithFeedback by gen { }
+            return newGen
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        fun <T, R : Any> lazyMapNotNullParamGen(gen: ParamGen<T>, fn: Function<T, R?>): ParamGen<R> {
+            val newGen = object : ParamGen<R> { override fun iterator() = gen.lazyMapNotNull(fn::apply).iterator() }
+            if (gen is WithFeedback) return object : ParamGen<R> by newGen, WithFeedback by gen { }
+            return newGen
+        }
+
+        private fun <T, R> ParamGen<T>.lazyMapParamGen(fn: (T) -> R) =
+            lazyMapParamGen(this, Function(fn))
+        private fun <T, R : Any> ParamGen<T>.lazyMapNotNullParamGen(fn: (T) -> R?) =
+            lazyMapNotNullParamGen(this, Function(fn))
     }
 
     data class Config(
@@ -100,5 +128,6 @@ interface ParamGen<T> : Iterable<T> {
 
     interface ParamRef<T> {
         val value: T?
+        fun <R> map(fn: (T) -> R): ParamRef<R>
     }
 }

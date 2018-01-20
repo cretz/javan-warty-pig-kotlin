@@ -4,9 +4,8 @@ import java.lang.invoke.MethodHandle
 import java.lang.invoke.WrongMethodTypeException
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import java.util.function.Supplier
+import java.util.function.Function
 
 open class Fuzzer(val conf: Config) {
 
@@ -41,9 +40,9 @@ open class Fuzzer(val conf: Config) {
 
     data class Config(
         val mh: MethodHandle,
-        val paramGenConf: ParamGen.Config = ParamGen.Config(),
+        val paramGenConf: Function<Int, ParamGen.Config> = Function { ParamGen.Config() },
         val params: ParamProvider = ParamProvider.Suggested(
-            mh.type().parameterArray().map { ParamGen.suggested(it, paramGenConf) }
+            mh.type().parameterArray().mapIndexed { index, cls -> ParamGen.suggested(cls, paramGenConf.apply(index)) }
         ),
         val postSubmissionHandler: PostSubmissionHandler? = null,
         // We default to just a single-thread, single-item queue

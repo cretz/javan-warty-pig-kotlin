@@ -3,20 +3,20 @@ package jwp.fuzz
 import java.math.BigInteger
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
 import java.util.concurrent.locks.ReentrantLock
 import java.util.function.Supplier
 import kotlin.coroutines.experimental.buildSequence
 import kotlin.math.min
 
 open class ByteArrayParamGen(val conf: Config = Config()) :
-        ParamGen<ByteArrayParamGen.ByteArrayParam>, ParamGen.WithFeedback {
+        ParamGen<ByteArrayParamGen.EntryParamRef<ByteArray>>, ParamGen.WithFeedback {
 
     // Sorted by shortest first
     val userDictionary = conf.dictionary.sortedBy { it.size }
     val seenBranchesCache = conf.branchesHashCacheSupplier.get()
-    val inputQueue = conf.byteArrayInputQueueSupplier.get()
+    val inputQueue = conf.byteArrayInputQueueSupplier.get().also { queue ->
+        conf.initialValues.forEach { queue.enqueue(TestCase(it)) }
+    }
     val arithMax = conf.arithMax
     val arithValsToAdd = (1..arithMax).flatMap { listOf(it, -it) }
 
@@ -26,6 +26,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     private var resultCount = BigInteger.ZERO
     private var queueCycle = BigInteger.ZERO
     private var startMs = -1L
+    private var lastEntry: QueueEntry? = null
 
     override fun onResult(result: ExecutionResult, myParamIndex: Int) {
         synchronized(varMutex) {
@@ -33,7 +34,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             totalBranchCount += result.traceResult.branchesWithResolvedMethods.size.toBigInteger()
             resultCount++
         }
-        (result.params[myParamIndex] as? ByteArrayParam)?.entry?.applyResult(result)
+        (result.params[myParamIndex] as? EntryParamRef<*>)?.entry?.applyResult(result)
         // If it's a unique path, then our param goes to the input queue (if it's not null)
         if (seenBranchesCache.checkUniqueAndStore(result)) inputQueue.enqueue(TestCase(
             result.params[myParamIndex] as? ByteArray ?: return,
@@ -42,11 +43,18 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         ))
     }
 
-    override fun iterator() =
-        generateSequence { inputQueue.cullAndDequeue() }.map(::stages).flatten().iterator()
+    override fun iterator() = generateSequence {
+        // If we can't dequeue anything, we use the last entry and call random havoc...
+        // if there is no last, it means we had an empty queue to begin with, boo
+        inputQueue.cullAndDequeue()?.let(::stages) ?: lastEntry?.let { lastEntry ->
+            stageHavoc(lastEntry.bytes).asSequence().map { EntryParamRef(it, lastEntry) }.asIterable()
+        } ?: error("Empty queue")
+    }.flatten().iterator()
 
-    open fun stages(entry: QueueEntry): Iterable<ByteArrayParam> {
+    open fun stages(entry: QueueEntry): Iterable<EntryParamRef<ByteArray>> {
+        // TODO: trimming
         synchronized(varMutex) {
+            lastEntry = entry
             queueCycle++
             if (startMs < 0) startMs = System.currentTimeMillis()
         }
@@ -67,7 +75,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             // TODO: user extras
             stageHavoc(entry.bytes)
             // TODO: splices
-        ).flatten().map { ByteArrayParam(it, entry) }.asIterable()
+        ).flatten().map { EntryParamRef(it, entry) }.asIterable()
     }
 
     open fun stageFlipBits(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
@@ -250,11 +258,12 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     }
 
     data class Config(
+        val initialValues: List<ByteArray> = listOf("test".toByteArray()),
         val dictionary: List<ByteArray> = emptyList(),
         val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
             Supplier { BranchesHashCache.InMemory() },
         val byteArrayInputQueueSupplier: Supplier<ByteArrayInputQueue> =
-            Supplier { ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) },
+            Supplier { ByteArrayInputQueue.InMemory() },
         val havocTweaks: List<Havoc.Tweak> = Havoc.suggestedTweaks,
         val rand: Random = Random(),
         val arithMax: Int = 35,
@@ -267,7 +276,9 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         val maxInput: Int = 1 * 1024 * 1024
     )
 
-    class ByteArrayParam(override val value: ByteArray, val entry: QueueEntry) : ParamGen.ParamRef<ByteArray>
+    class EntryParamRef<T>(override val value: T, val entry: QueueEntry) : ParamGen.ParamRef<T> {
+        override fun <R> map(fn: (T) -> R) = EntryParamRef(fn(value), entry)
+    }
 
     class QueueEntry(
         val bytes: ByteArray,
@@ -291,8 +302,8 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
 
     class TestCase(
         val bytes: ByteArray,
-        val branchHashes: List<Int>?,
-        val nanoTime: Long?
+        val branchHashes: List<Int>? = null,
+        val nanoTime: Long? = null
     ) : Comparable<TestCase> {
         val score = if (nanoTime == null) null else bytes.size * nanoTime
 
@@ -334,14 +345,14 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     interface ByteArrayInputQueue {
         // This should try to be unbounded, but should immediately throw if unable to enqueue
         fun enqueue(testCase: TestCase)
-        // Implementations can and should time this out and throw a TimeoutException if waiting too long
-        fun cullAndDequeue(): QueueEntry
 
-        open class InMemory(val timeoutTime: Long, val timeoutUnit: TimeUnit) : ByteArrayInputQueue {
+        // Implementations should return null immediately if there is nothing in the queue
+        fun cullAndDequeue(): QueueEntry?
+
+        open class InMemory() : ByteArrayInputQueue {
             protected var queue = ArrayList<TestCase>()
             protected val lock = ReentrantLock()
             protected var enqueuedSinceLastDequeued = false
-            protected val notEmptyCond = lock.newCondition()
             protected var queueCounter = 0L
 
             override fun enqueue(testCase: TestCase) {
@@ -349,19 +360,16 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                 try {
                     queue.add(testCase)
                     enqueuedSinceLastDequeued = true
-                    notEmptyCond.signal()
                 } finally {
                     lock.unlock()
                 }
             }
 
-            override fun cullAndDequeue(): QueueEntry {
+            override fun cullAndDequeue(): QueueEntry? {
                 lock.lock()
                 try {
-                    // Wait for queue to not be empty
-                    while (queue.isEmpty()) {
-                        if (!notEmptyCond.await(timeoutTime, timeoutUnit)) throw TimeoutException()
-                    }
+                    // Return if queue is not empty
+                    if (queue.isEmpty()) return null
                     // Cull if there have been some enqueued since
                     if (enqueuedSinceLastDequeued) {
                         enqueuedSinceLastDequeued = false

@@ -99,6 +99,9 @@ fun Int.Companion.fromBytes(byte0: Byte, byte1: Byte, byte2: Byte, byte3: Byte) 
         ((byte1.toInt() and 0xFF) shl 8) or
         ((byte0.toInt() and 0xFF))
 
+fun <T, R> Iterable<T>.lazyMap(fn: (T) -> R): Iterable<R> = asSequence().map(fn).asIterable()
+fun <T, R : Any> Iterable<T>.lazyMapNotNull(fn: (T) -> R?): Iterable<R> = asSequence().mapNotNull(fn).asIterable()
+
 fun <T> List<T>.randItem(rand: Random) = get(rand.nextInt(size))
 
 val Short.binaryString get() = "%16s".format(unsigned.toString(2)).replace(' ', '0')

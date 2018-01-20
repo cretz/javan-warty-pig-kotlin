@@ -43,9 +43,8 @@ project(':agent') {
                 artifact 'jvmti'
             }
             target 'mingw', {
-                linkerOpts '-Xlinker', '--export-all-symbols', 'src/main/cpp/kotlin_bridge.cpp',
-                        '-I', '\\"' + includeBase.toString() + '\\"', '-I', '\\"' + includeWin32.toString() + '\\"',
-                        '-I', 'build/konan/bin/mingw'
+                linkerOpts '-I', '\\"' + includeBase.toString() + '\\"',
+                        '-I', '\\"' + includeWin32.toString() + '\\"'
             }
         }
     }

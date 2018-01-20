@@ -13,8 +13,7 @@ open class Fuzzer(val conf: Config) {
     fun fuzz() {
         // Just go over every param set, invoking...
         var first = true
-        if (conf.params is ParameterProvider.WithFuzzerConfig) conf.params.setFuzzerConfig(conf)
-        val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.mh, conf.branchClassExcluder)
+        val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.mh)
         conf.params.forEach { paramSet ->
             var fut: CompletableFuture<ExecutionResult>? = conf.invoker.invoke(invokerConf, *paramSet)
             // As a special case for the first run, we wait for completion and fail the
@@ -29,7 +28,7 @@ open class Fuzzer(val conf: Config) {
                 }
             }
             if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
-            if (conf.params is ParameterProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
+            if (conf.params is ParamProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
         }
 
         // Shutdown and wait for a really long time...
@@ -42,35 +41,18 @@ open class Fuzzer(val conf: Config) {
 
     data class Config(
         val mh: MethodHandle,
-        val params: Iterable<Array<Any?>> = ParameterProvider.suggested(
-            mh.type().parameterArray().map { TypeGen.suggested(it) }.toTypedArray()
+        val paramGenConf: ParamGen.Config = ParamGen.Config(),
+        val params: ParamProvider = ParamProvider.Suggested(
+            mh.type().parameterArray().map { ParamGen.suggested(it, paramGenConf) }
         ),
         val postSubmissionHandler: PostSubmissionHandler? = null,
         // We default to just a single-thread, single-item queue
         val invoker: TracingMethodInvoker = TracingMethodInvoker.ExecutorServiceInvoker(
             TracingMethodInvoker.CurrentThreadExecutorService()
         ),
-        val branchClassExcluder: BranchClassExcluder? = BranchClassExcluder.ByQualifiedClassNamePrefix(
-            "java.", "jdk.internal.", "jwp.fuzz.", "kotlin.", "scala.", "sun."
-        ),
         val dictionary: List<ByteArray> = emptyList(),
-        val tracer: Tracer = Tracer.JvmtiTracer(),
-        val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
-            Supplier { BranchesHashCache.InMemory() },
-        val byteArrayInputQueueSupplier: Supplier<ByteArrayProvider.ByteArrayInputQueue> =
-            Supplier { ByteArrayProvider.ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) }
+        val tracer: Tracer = Tracer.JvmtiTracer()
     )
-
-    @FunctionalInterface
-    interface BranchClassExcluder {
-        fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?): Boolean
-
-        open class ByQualifiedClassNamePrefix(vararg val prefixes: String) : BranchClassExcluder {
-            override fun excludeBranch(fromClass: Class<*>?, toClass: Class<*>?) =
-                fromClass != null && toClass != null &&
-                    prefixes.any { fromClass.name.startsWith(it) || toClass.name.startsWith(it) }
-        }
-    }
 
     @FunctionalInterface
     interface PostSubmissionHandler {
@@ -93,18 +75,6 @@ open class Fuzzer(val conf: Config) {
                 _totalExecutions++
                 it.apply { _uniqueBranchResults.putIfAbsent(traceResult.stableBranchesHash, this) }
             }
-        }
-    }
-
-    @FunctionalInterface
-    interface BranchesHashCache {
-        // Must be thread safe. Return true if unique.
-        fun checkUniqueAndStore(result: ExecutionResult): Boolean
-
-        open class InMemory : BranchesHashCache {
-            val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
-            override fun checkUniqueAndStore(result: ExecutionResult) =
-                seenBranchHashes.add(result.traceResult.stableBranchesHash)
         }
     }
 }

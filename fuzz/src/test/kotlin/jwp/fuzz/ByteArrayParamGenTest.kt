@@ -1,12 +1,11 @@
 package jwp.fuzz
 
-import kotlin.math.min
 import kotlin.test.Test
 
-class ByteArrayProviderTest : TestBase() {
+class ByteArrayParamGenTest : TestBase() {
 
     @Test
-    fun testStageFlipBits(): Unit = with(ByteArrayProvider()) {
+    fun testStageFlipBits(): Unit = with(ByteArrayParamGen()) {
         // Make sure only one bit, in order, is flipped
         assertEquals(
             (0 until 32).map { "0".repeat(32).replaceRange(it, it + 1, "1") },
@@ -18,7 +17,7 @@ class ByteArrayProviderTest : TestBase() {
     }
 
     @Test
-    fun testStageFlipBytes(): Unit = with(ByteArrayProvider()) {
+    fun testStageFlipBytes(): Unit = with(ByteArrayParamGen()) {
         // Single byte
         fun byteList(vararg b: Byte) = b.toList()
         assertEquals(
@@ -38,20 +37,20 @@ class ByteArrayProviderTest : TestBase() {
     }
 
     @Test
-    fun testStageArith8(): Unit = with(ByteArrayProvider()) {
+    fun testStageArith8(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped ones in there
         assertEquals(false, allArith8.any { allFlipped.any(it::contentEquals) })
     }
 
     @Test
-    fun testStageArith16(): Unit = with(ByteArrayProvider()) {
+    fun testStageArith16(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped ones and no arith8 ones in there
         assertEquals(false, allArith16.any { allFlipped.any(it::contentEquals) })
         assertEquals(false, allArith16.any { allArith8.any(it::contentEquals) })
     }
 
     @Test
-    fun testStageArith32(): Unit = with(ByteArrayProvider()) {
+    fun testStageArith32(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped ones and no arith8 or arith16 ones in there
         assertEquals(false, allArith32.any { allFlipped.any(it::contentEquals) })
         assertEquals(false, allArith32.any { allArith8.any(it::contentEquals) })
@@ -59,7 +58,7 @@ class ByteArrayProviderTest : TestBase() {
     }
 
     @Test
-    fun testStageInteresting8(): Unit = with(ByteArrayProvider()) {
+    fun testStageInteresting8(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped ones and no arith ones in there
         assertEquals(false, allInteresting8.any { allFlipped.any(it::contentEquals) })
         assertEquals(false, allInteresting8.any { allArith8.any(it::contentEquals) })
@@ -68,7 +67,7 @@ class ByteArrayProviderTest : TestBase() {
     }
 
     @Test
-    fun testStageInteresting16(): Unit = with(ByteArrayProvider()) {
+    fun testStageInteresting16(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped, arith, or prev interesting ones in there
         assertEquals(false, allInteresting16.any { allFlipped.any(it::contentEquals) })
         assertEquals(false, allInteresting16.any { allArith8.any(it::contentEquals) })
@@ -78,7 +77,7 @@ class ByteArrayProviderTest : TestBase() {
     }
 
     @Test
-    fun testStageInteresting32(): Unit = with(ByteArrayProvider()) {
+    fun testStageInteresting32(): Unit = with(ByteArrayParamGen()) {
         // I don't care the values, I just want no flipped, arith, or prev interesting ones in there
         assertEquals(false, allInteresting32.any { allFlipped.any(it::contentEquals) })
         assertEquals(false, allInteresting32.any { allArith8.any(it::contentEquals) })
@@ -90,23 +89,14 @@ class ByteArrayProviderTest : TestBase() {
 
     companion object {
         val bytes = ByteArray(8)
-        val allFlipped = with(ByteArrayProvider()) {
+        val allFlipped = with(ByteArrayParamGen()) {
             (stageFlipBits(bytes, 1) + stageFlipBits(bytes, 2) + stageFlipBits(bytes, 4)).toList()
         }
-        val allArith8 = with(ByteArrayProvider()) { stageArith8(bytes).toList() }
-        val allArith16 = with(ByteArrayProvider()) { stageArith16(bytes).toList() }
-        val allArith32 = with(ByteArrayProvider()) { stageArith32(bytes).toList() }
-        val allInteresting8 = with(ByteArrayProvider()) { stageInteresting8(bytes).toList() }
-        val allInteresting16 = with(ByteArrayProvider()) { stageInteresting16(bytes).toList() }
-        val allInteresting32 = with(ByteArrayProvider()) { stageInteresting32(bytes).toList() }
-    }
-
-    object ByteArrayComparator : Comparator<ByteArray> {
-        override fun compare(o1: ByteArray?, o2: ByteArray?): Int {
-            if (o1 == null) { return if (o2 == null) 0 else 1 }
-            if (o2 == null) return -1
-            for (i in 0 until min(o1.size, o2.size)) if (o1[i] != o2[i]) return o1[i].compareTo(o2[i])
-            return o1.size.compareTo(o2.size)
-        }
+        val allArith8 = with(ByteArrayParamGen()) { stageArith8(bytes).toList() }
+        val allArith16 = with(ByteArrayParamGen()) { stageArith16(bytes).toList() }
+        val allArith32 = with(ByteArrayParamGen()) { stageArith32(bytes).toList() }
+        val allInteresting8 = with(ByteArrayParamGen()) { stageInteresting8(bytes).toList() }
+        val allInteresting16 = with(ByteArrayParamGen()) { stageInteresting16(bytes).toList() }
+        val allInteresting32 = with(ByteArrayParamGen()) { stageInteresting32(bytes).toList() }
     }
 }

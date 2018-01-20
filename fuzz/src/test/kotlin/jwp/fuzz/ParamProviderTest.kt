@@ -2,14 +2,14 @@ package jwp.fuzz
 
 import kotlin.test.Test
 
-class ParameterProviderTest : TestBase() {
+class ParamProviderTest : TestBase() {
 
     @Test
-    fun testParameterProviderSimple() {
-        val iter = ParameterProvider.allPermutations(arrayOf(
-            listOf(1, 2),
-            listOf("4"),
-            listOf(6, 7, 8)
+    fun testAllPermutations() {
+        val iter = ParamProvider.AllPermutations(listOf(
+            ParamGen.Simple(listOf(1, 2)),
+            ParamGen.Simple(listOf("4")),
+            ParamGen.Simple(listOf(6, 7, 8))
         ))
         assertEquals(listOf(
             listOf(1, "4", 6),

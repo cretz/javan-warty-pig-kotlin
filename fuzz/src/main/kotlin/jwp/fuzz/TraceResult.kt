@@ -20,10 +20,6 @@ abstract class TraceResult {
         }
     }
 
-    fun filtered(excluder: Fuzzer.BranchClassExcluder): TraceResult = filtered(Predicate { branch ->
-        !excluder.excludeBranch(branch.fromMethodDeclaringClass, branch.toMethodDeclaringClass)
-    })
-
     // Each branch is a set of 5 longs: methodFrom, locationFrom, methodTo, locationTo,
     // and hit count. Note, some 5-sets of these may be all -1's which means they should not
     // be considered branches and should be ignored

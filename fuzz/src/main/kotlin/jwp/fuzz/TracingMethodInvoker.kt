@@ -11,8 +11,7 @@ abstract class TracingMethodInvoker {
 
     data class Config(
         val tracer: Tracer,
-        val mh: MethodHandle,
-        val branchClassExcluder: Fuzzer.BranchClassExcluder?
+        val mh: MethodHandle
     )
 
     open class ExecutorServiceInvoker(val exec: ExecutorService) : TracingMethodInvoker() {
@@ -26,10 +25,7 @@ abstract class TracingMethodInvoker {
             ExecutionResult(
                 conf.mh,
                 params.toList(),
-                traceComplete.tracerResult.let { tracerResult ->
-                    if (conf.branchClassExcluder == null) tracerResult
-                    else tracerResult.filtered(conf.branchClassExcluder)
-                },
+                traceComplete.tracerResult,
                 invokeResult,
                 endNs - beginNs
             )

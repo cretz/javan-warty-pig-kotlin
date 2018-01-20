@@ -18,7 +18,7 @@ class ByteUtilTest : TestBase() {
         // array. Then check them and +/- 1 to see if they could be flips.
 
         // All sets of flipped bits for 0
-        val withFlippedBits = with(ByteArrayProvider()) {
+        val withFlippedBits = with(ByteArrayParamGen()) {
             val bytes = ByteArray(9)
             stageFlipBits(bytes, 1) + stageFlipBits(bytes, 2) + stageFlipBits(bytes, 4)
         }

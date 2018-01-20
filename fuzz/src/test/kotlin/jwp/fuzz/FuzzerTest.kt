@@ -3,10 +3,6 @@ package jwp.fuzz
 import jwp.fuzztest.TestMethods
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.SynchronousQueue
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 
 class FuzzerTest : TestBase() {

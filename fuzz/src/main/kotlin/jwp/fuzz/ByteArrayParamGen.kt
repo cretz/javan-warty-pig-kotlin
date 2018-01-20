@@ -1,27 +1,27 @@
 package jwp.fuzz
 
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.locks.ReentrantLock
-import kotlin.collections.ArrayList
+import java.util.function.Supplier
 import kotlin.coroutines.experimental.buildSequence
 
-// TODO: we know lots of bit twiddling math is wrong in here right now...we are just jotting down pseudocode
-// before we write the test cases
+open class ByteArrayParamGen(
+    val dictionary: List<ByteArray> = emptyList(),
+    val seenBranchesCache: BranchesHashCache = BranchesHashCache.InMemory(),
+    val inputQueue: ByteArrayInputQueue = ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES)
+) : ParamGen<ByteArray>, ParamGen.WithFeedback {
 
-open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzzerConfig, Iterable<ByteArray> {
+    constructor(conf: Config) : this(
+        conf.dictionary,
+        conf.branchesHashCacheSupplier.get(),
+        conf.byteArrayInputQueueSupplier.get()
+    )
 
     // Sorted by shortest first
-    lateinit var userDictionary: List<ByteArray> internal set
-    lateinit var seenBranchesCache: Fuzzer.BranchesHashCache internal set
-    lateinit var inputQueue: ByteArrayInputQueue internal set
-
-    override fun setFuzzerConfig(fuzzerConfig: Fuzzer.Config) {
-        userDictionary = fuzzerConfig.dictionary.toTypedArray().apply { sortBy { it.size } }.toList()
-        seenBranchesCache = fuzzerConfig.branchesHashCacheSupplier.get()
-        inputQueue = fuzzerConfig.byteArrayInputQueueSupplier.get()
-    }
+    val userDictionary = dictionary.sortedBy { it.size }
 
     override fun onResult(result: ExecutionResult, myParamIndex: Int) {
         // If it's a unique path, then our param goes to the input queue (if it's not null)
@@ -92,9 +92,9 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
     open fun stageArith32(buf: ByteArray) = buildSequence {
         fun affectsMoreThanTwoBytes(orig: Int, new: Int) =
             (if (orig.byte0 != new.byte0) 1 else 0) +
-            (if (orig.byte1 != new.byte1) 1 else 0) +
-            (if (orig.byte2 != new.byte2) 1 else 0) +
-            (if (orig.byte3 != new.byte3) 1 else 0) > 2
+                (if (orig.byte1 != new.byte1) 1 else 0) +
+                (if (orig.byte2 != new.byte2) 1 else 0) +
+                (if (orig.byte3 != new.byte3) 1 else 0) > 2
         for (index in 0 until buf.size - 3) {
             val origLe = buf.getIntLe(index)
             val origBe = buf.getIntBe(index)
@@ -111,8 +111,8 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
 
     open fun stageInteresting8(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Byte, new: Byte) =
-            new >= orig - arithMax && new <= orig + arithMax
-        for (index in 0 until buf.size)  TypeGen.interestingByte.forEach { byte ->
+                new >= orig - arithMax && new <= orig + arithMax
+        for (index in 0 until buf.size)  ParamGen.interestingByte.forEach { byte ->
             val orig = buf[index]
             if (!couldBeArith(orig, byte) && !orig.couldHaveBitFlippedTo(byte))
                 yield(buf.copyAnd { set(index, byte) })
@@ -125,10 +125,10 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
             return (new >= orig - arithMax && new <= orig + arithMax) ||
                 (new >= origBe - arithMax && new <= origBe + arithMax)
         }
-        fun couldBeInteresting8(orig: Short, new: Short) = TypeGen.interestingByte.any {
+        fun couldBeInteresting8(orig: Short, new: Short) = ParamGen.interestingByte.any {
             (orig.byte0 == new.byte0 && it == new.byte1) || (it == new.byte0 && orig.byte1 == new.byte1)
         }
-        for (index in 0 until buf.size - 1)  TypeGen.interestingShort.forEach { short ->
+        for (index in 0 until buf.size - 1)  ParamGen.interestingShort.forEach { short ->
             val origLe = buf.getShortLe(index)
             if (!couldBeArith(origLe, short) && !couldBeInteresting8(origLe, short) &&
                     !origLe.couldHaveBitFlippedTo(short))
@@ -150,12 +150,12 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
             }
             fun shortArith(index: Int) = (0 until 4).all {
                 it == index + 1 ||
-                (it == index && newArr.getShortLe(it) - origArr.getShortLe(it) in (-arithMax)..arithMax) ||
-                origArr[it] == newArr[it]
+                    (it == index && newArr.getShortLe(it) - origArr.getShortLe(it) in (-arithMax)..arithMax) ||
+                    origArr[it] == newArr[it]
             }
             return (0 until 4).any { byteArith(it) || (it < 3 && shortArith(it)) }
         }
-        fun couldBeInteresting8(orig: Int, new: Int) = TypeGen.interestingByte.any {
+        fun couldBeInteresting8(orig: Int, new: Int) = ParamGen.interestingByte.any {
             (it == new.byte0 && orig.byte1 == new.byte1 && orig.byte2 == new.byte2 && orig.byte3 == new.byte3) ||
                 (orig.byte0 == new.byte0 && it == new.byte1 && orig.byte2 == new.byte2 && orig.byte3 == new.byte3) ||
                 (orig.byte0 == new.byte0 && orig.byte1 == new.byte1 && it == new.byte2 && orig.byte3 == new.byte3) ||
@@ -167,16 +167,16 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
             for (i in 0 until 3) {
                 val pre1 = origArr[i]
                 val pre2 = origArr[i + 1]
-                if (TypeGen.interestingShort.any {
+                if (ParamGen.interestingShort.any {
                     origArr.apply { putShortLe(i, it) }.contentEquals(newArr) ||
-                        origArr.apply { putShortBe(i, it) }.contentEquals(newArr)
+                            origArr.apply { putShortBe(i, it) }.contentEquals(newArr)
                 }) return true
                 origArr[i] = pre1
                 origArr[i + 1] = pre2
             }
             return false
         }
-        for (index in 0 until buf.size - 3)  TypeGen.interestingInt.forEach { int ->
+        for (index in 0 until buf.size - 3)  ParamGen.interestingInt.forEach { int ->
             val origLe = buf.getIntLe(index)
             if (!couldBeArith(origLe, int) && !couldBeInteresting8(origLe, int) &&
                     !couldBeInteresting16(origLe, int) && !origLe.couldHaveBitFlippedTo(int))
@@ -193,13 +193,21 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
     open fun stageDictionary(buf: ByteArray, sortedDictionary: List<ByteArray>) = buildSequence {
         // To match AFL, we'll put different dictionary entries at an index before going on to the next index
         if (sortedDictionary.isNotEmpty()) for (index in 0 until buf.size) {
-            for (entry in sortedDictionary) {
+            sortedDictionary.forEach { entry ->
                 if (index + entry.size < buf.size) yield(buf.copyOf().apply {
                     for (i in 0 until entry.size) set(index + i, entry[i])
                 })
             }
         }
     }.asIterable()
+
+    data class Config(
+        val dictionary: List<ByteArray> = emptyList(),
+        val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
+            Supplier { BranchesHashCache.InMemory() },
+        val byteArrayInputQueueSupplier: Supplier<ByteArrayInputQueue> =
+            Supplier { ByteArrayInputQueue.InMemory(1L, TimeUnit.MINUTES) }
+    )
 
     class TestCase(
         val bytes: ByteArray,
@@ -227,6 +235,18 @@ open class ByteArrayProvider : TypeGen.WithFeedback, ParameterProvider.WithFuzze
                 }
                 favored + unfavored
             }
+        }
+    }
+
+    @FunctionalInterface
+    interface BranchesHashCache {
+        // Must be thread safe. Return true if unique.
+        fun checkUniqueAndStore(result: ExecutionResult): Boolean
+
+        open class InMemory : BranchesHashCache {
+            val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+            override fun checkUniqueAndStore(result: ExecutionResult) =
+                seenBranchHashes.add(result.traceResult.stableBranchesHash)
         }
     }
 

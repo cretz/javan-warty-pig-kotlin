@@ -6,8 +6,8 @@ class TracerTest : TestBase() {
 
     @Test
     fun testSimpleJvmtiTracer() {
-        // Setup tracer and run
-        val tracer = Tracer.JvmtiTracer()
+        // Setup tracer and run (but don't ignore any methods like we otherwise would)
+        val tracer = Tracer.JvmtiTracer(branchClassExcluder = null)
         val thread = Thread.currentThread()
         tracer.startTrace(thread)
         stringLen("Trace this!")

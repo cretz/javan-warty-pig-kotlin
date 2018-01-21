@@ -9,3 +9,6 @@
 .project
 .settings
 .classpath
+/examples/csv/build
+/examples/simple/build
+/examples/simple/bin

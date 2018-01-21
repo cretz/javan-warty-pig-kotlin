@@ -97,3 +97,22 @@ project(':fuzz') {
         }
     }
 }
+
+project(':examples') {
+    subprojects {
+        apply plugin: 'kotlin'
+        apply plugin: 'application'
+        dependencies {
+            compile project(':fuzz')
+        }
+        applicationDefaultJvmArgs = ['-agentpath:../../agent/build/konan/bin/mingw/agent.dll']
+    }
+}
+
+project(':examples:simple') {
+    mainClassName = 'jwp.examples.simple.Main'
+}
+
+project(':examples:csv') {
+    mainClassName = 'jwp.examples.csv.Main'
+}

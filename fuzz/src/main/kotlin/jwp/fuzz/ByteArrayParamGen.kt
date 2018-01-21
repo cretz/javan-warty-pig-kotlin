@@ -43,13 +43,18 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         ))
     }
 
-    override fun iterator() = generateSequence {
+    // Start with the initial values then generate
+    override fun iterator() = (initialValues().asSequence() +  generateSequence {
         // If we can't dequeue anything, we use the last entry and call random havoc...
         // if there is no last, it means we had an empty queue to begin with, boo
         inputQueue.cullAndDequeue()?.let(::stages) ?: lastEntry?.let { lastEntry ->
             stageHavoc(lastEntry.bytes).asSequence().map { EntryParamRef(it, lastEntry) }.asIterable()
         } ?: error("Empty queue")
-    }.flatten().iterator()
+    }.flatten()).iterator()
+
+    open fun initialValues() = conf.initialValues.mapIndexed { index, initVal ->
+        EntryParamRef(initVal, QueueEntry(initVal, (index - conf.initialValues.size).toLong()))
+    }.asIterable()
 
     open fun stages(entry: QueueEntry): Iterable<EntryParamRef<ByteArray>> {
         // TODO: trimming
@@ -282,6 +287,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
 
     class QueueEntry(
         val bytes: ByteArray,
+        // Negative means initial values
         val dequeuedIndex: Long
     ) {
         private val varMutex = Object()
@@ -468,7 +474,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                 } else it.fill(
                     if (conf.rand.nextBoolean()) (conf.rand.nextInt(256) - 128).toByte()
                     else it[conf.rand.nextInt(it.size)],
-                    copyTo, copyLen
+                    copyTo, copyTo + copyLen
                 )
             }
         }

@@ -1,3 +1,5 @@
 rootProject.name = 'javan-warty-pig'
 include 'agent',
-        'fuzz'
+        'fuzz',
+        'examples:csv',
+        'examples:simple'

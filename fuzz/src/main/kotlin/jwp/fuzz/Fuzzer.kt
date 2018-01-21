@@ -4,6 +4,7 @@ import java.lang.invoke.MethodHandle
 import java.lang.invoke.WrongMethodTypeException
 import java.util.*
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.function.Function
 
@@ -60,20 +61,24 @@ open class Fuzzer(val conf: Config) {
             future: CompletableFuture<ExecutionResult>
         ): CompletableFuture<ExecutionResult>?
 
-        open class TrackUniqueBranches : PostSubmissionHandler {
-            private val _uniqueBranchResults = LinkedHashMap<Int, ExecutionResult>()
-            val uniqueBranchResults: Collection<ExecutionResult> get() = _uniqueBranchResults.values
+        abstract class TrackUniqueBranches(val includeHitCounts: Boolean = true) : PostSubmissionHandler {
+            private val uniqueBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
 
-            private var _totalExecutions = 0
-            val totalExecutions: Int get() = _totalExecutions
+            @Volatile
+            var totalExecutions = 0L
+                private set
 
-            override fun postSubmission(
-                conf: Config,
-                future: CompletableFuture<ExecutionResult>
-            ) = future.thenApply {
-                _totalExecutions++
-                it.apply { _uniqueBranchResults.putIfAbsent(traceResult.stableBranchesHash, this) }
+            override fun postSubmission(conf: Config, future: CompletableFuture<ExecutionResult>) = future.thenApply {
+                totalExecutions++
+                it.apply {
+                    val hash =
+                        if (includeHitCounts) traceResult.stableBranchesHash
+                        else traceResult.stableBranchesHash(false)
+                    if (uniqueBranchHashes.add(hash)) onUnique(this)
+                }
             }
+
+            abstract fun onUnique(result: ExecutionResult)
         }
     }
 }

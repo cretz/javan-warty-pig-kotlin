@@ -105,6 +105,7 @@ project(':examples') {
         dependencies {
             compile project(':fuzz')
         }
+        run.systemProperties System.properties
         applicationDefaultJvmArgs = ['-agentpath:../../agent/build/konan/bin/mingw/agent.dll']
     }
 }

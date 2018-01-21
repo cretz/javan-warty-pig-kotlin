@@ -55,4 +55,38 @@ After a few seconds, you'll get something like the following:
 
 While it may look like some paths are repeating, it's important to remember that the number of times a branch is
 executed (i.e. "hit count") matters too. Like AFL, hit counts are grouped into buckets of 1, 2, 3, 4-7, 8-15, 16-31,
-32-127, and 128+. This runs until the process is manually killed.
+32-127, and 128+. So different loop counts can be seen as different. This runs until the process is manually killed.
+
+In this example, if the system property `noHitCounts` is present, then hit counts will not be included in the uniqueness 
+checks. So, running:
+
+    path/to/gradle --no-daemon :examples:simple:run -DnoHitCounts
+
+Might result in:
+
+    Creating fuzzer
+    Beginning fuzz
+    New path for param '+1.2', result: Ok(value=Num(neg=false, num=1, frac=2))
+    New path for param ';1.2', result: Failure(ex=java.lang.NumberFormatException: No leading number(s))
+    New path for param '+◄.2', result: Failure(ex=java.lang.NumberFormatException: No leading number(s))
+    New path for param '+1,2', result: Failure(ex=java.lang.NumberFormatException: Unknown char: ,)
+    New path for param '7477d?777777777?', result: Failure(ex=java.lang.NumberFormatException: Unknown char: d)
+    New path for param '+1."', result: Failure(ex=java.lang.NumberFormatException: Decimal without trailing number(s))
+    New path for param '-1.2', result: Ok(value=Num(neg=true, num=1, frac=2))
+    New path for param '31.2', result: Ok(value=Num(neg=false, num=31, frac=2))
+    New path for param '+162', result: Ok(value=Num(neg=false, num=162, frac=))
+    New path for param '+', result: Failure(ex=java.lang.NumberFormatException: No leading number(s))
+    New path for param '2', result: Ok(value=Num(neg=false, num=2, frac=))
+    New path for param '+1.2.2', result: Failure(ex=java.lang.NumberFormatException: Unknown char: .)
+    New path for param '+1.', result: Failure(ex=java.lang.NumberFormatException: Decimal without trailing number(s))
+    New path for param '22.R', result: Failure(ex=java.lang.NumberFormatException: Decimal without trailing number(s))
+    New path for param '-/■', result: Failure(ex=java.lang.NumberFormatException: No leading number(s))
+    New path for param '-1.'', result: Failure(ex=java.lang.NumberFormatException: Decimal without trailing number(s))
+    New path for param '-1 2', result: Failure(ex=java.lang.NumberFormatException: Unknown char:  )
+    New path for param '1.1(', result: Failure(ex=java.lang.NumberFormatException: Unknown char: ()
+    New path for param '200.', result: Failure(ex=java.lang.NumberFormatException: Decimal without trailing number(s))
+    New path for param '-', result: Failure(ex=java.lang.NumberFormatException: No leading number(s))
+    New path for param '-2', result: Ok(value=Num(neg=true, num=2, frac=))
+
+And then it might appear to hang forever because no matter what is tried, there are no more unique branch paths to
+discover.

@@ -3,6 +3,8 @@ package jwp.fuzz
 import jwp.fuzztest.TestMethods
 import java.lang.invoke.MethodHandles
 import java.lang.invoke.MethodType
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 
 class FuzzerTest : TestBase() {
@@ -10,7 +12,7 @@ class FuzzerTest : TestBase() {
     @Test
     fun testSimpleFunction() {
         // Start a fuzzer while tracking unique branches
-        val uniqTracker = Fuzzer.PostSubmissionHandler.TrackUniqueBranches()
+        val branches = Collections.synchronizedList(ArrayList<ExecutionResult>())
         val fuzzer = Fuzzer(Fuzzer.Config(
             // We use a separate class here to avoid the default "jwp.fuzz." branch exclusion
             mh = MethodHandles.lookup().findStatic(
@@ -18,14 +20,14 @@ class FuzzerTest : TestBase() {
                 "simpleMethod",
                 MethodType.methodType(String::class.java, Int::class.java, Boolean::class.java)
             ),
-            postSubmissionHandler = uniqTracker
+            postSubmissionHandler = object : Fuzzer.PostSubmissionHandler.TrackUniqueBranches() {
+                override fun onUnique(result: ExecutionResult) { branches.add(result) }
+            }
         ))
         fuzzer.fuzz()
 
         // Check the branches that we expect...
-        val branches = uniqTracker.uniqueBranchResults
         if (debug) {
-            println("Total execution count: ${uniqTracker.totalExecutions}")
             branches.forEach { result ->
                 println("Params ${result.params.toList()} ran on unique path and returned ${result.invokeResult} " +
                         "in ${result.nanoTime / 1000000}ms")

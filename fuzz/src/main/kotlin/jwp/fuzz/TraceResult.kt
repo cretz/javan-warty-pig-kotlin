@@ -8,11 +8,12 @@ abstract class TraceResult {
 
     abstract val branchesWithResolvedMethods: List<BranchWithResolvedMethods>
 
-    val stableBranchesHash: Int by lazy {
+    val stableBranchesHash by lazy { stableBranchesHash() }
+
+    fun stableBranchesHash(includeHitCounts: Boolean = true) =
         // Sort the branches, hash each, then hash all together
         branchesWithResolvedMethods.sorted().
-            map(BranchWithResolvedMethods::stableHashCode).toIntArray().contentHashCode()
-    }
+            map { it.stableHashCode(includeHitCounts) }.toIntArray().contentHashCode()
 
     fun filtered(pred: Predicate<BranchWithResolvedMethods>): TraceResult = let { orig ->
         object : TraceResult() {
@@ -70,17 +71,17 @@ abstract class TraceResult {
         val branch: Branch
     ) : Comparable<BranchWithResolvedMethods> {
 
-        val stableHashCode: Int by lazy {
-            intArrayOf(
-                fromMethodDeclaringClass?.name?.hashCode() ?: 0,
-                fromMethodName?.hashCode() ?: 0,
-                branch.fromLocation.hashCode(),
-                toMethodDeclaringClass?.name?.hashCode() ?: 0,
-                toMethodName?.hashCode() ?: 0,
-                branch.toLocation.hashCode(),
-                branch.hitBucket
-            ).contentHashCode()
-        }
+        val stableHashCode by lazy { stableHashCode() }
+
+        fun stableHashCode(includeHitCount: Boolean = true) = intArrayOf(
+            fromMethodDeclaringClass?.name?.hashCode() ?: 0,
+            fromMethodName?.hashCode() ?: 0,
+            branch.fromLocation.hashCode(),
+            toMethodDeclaringClass?.name?.hashCode() ?: 0,
+            toMethodName?.hashCode() ?: 0,
+            branch.toLocation.hashCode(),
+            if (includeHitCount) branch.hitBucket else 0
+        ).contentHashCode()
 
         // Just compare the stable hashes
         override fun compareTo(other: BranchWithResolvedMethods) = stableHashCode.compareTo(other.stableHashCode)

@@ -11,6 +11,7 @@ object Main {
 
     @JvmStatic
     fun main(args: Array<String>) {
+        val includeHitCounts = System.getProperty("noHitCounts") == null
         println("Creating fuzzer")
         // Create the fuzzer
         val fuzzer = Fuzzer(Fuzzer.Config(
@@ -27,18 +28,10 @@ object Main {
                 )
             },
             // The handler where we'll print out what we found
-            postSubmissionHandler = object : Fuzzer.PostSubmissionHandler {
-                val uniqueBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
-                val printMutex = Object()
-                override fun postSubmission(
-                    conf: Fuzzer.Config,
-                    future: CompletableFuture<ExecutionResult>
-                ) = future.thenApply { res ->
-                    if (uniqueBranchHashes.add(res.traceResult.stableBranchesHash)) synchronized(printMutex) {
-                        println("New path for param '${res.rawParam(0)}', result: ${res.invokeResult}")
-                    }
-                    res
-                }
+            postSubmissionHandler = object : Fuzzer.PostSubmissionHandler.TrackUniqueBranches(includeHitCounts) {
+                @Synchronized
+                override fun onUnique(result: ExecutionResult) =
+                    println("New path for param '${result.rawParam(0)}', result: ${result.invokeResult}")
             },
             // Multithreaded instead of default?
             invoker = TracingMethodInvoker.ExecutorServiceInvoker(

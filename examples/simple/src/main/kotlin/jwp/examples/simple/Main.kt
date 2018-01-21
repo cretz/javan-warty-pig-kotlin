@@ -35,7 +35,7 @@ object Main {
                     future: CompletableFuture<ExecutionResult>
                 ) = future.thenApply { res ->
                     if (uniqueBranchHashes.add(res.traceResult.stableBranchesHash)) synchronized(printMutex) {
-                        println("Found new branch for parameter '${res.rawParam(0)}', result: ${res.invokeResult}")
+                        println("New path for param '${res.rawParam(0)}', result: ${res.invokeResult}")
                     }
                     res
                 }

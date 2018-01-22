@@ -1,10 +1,9 @@
 package jwp.examples.simple
 
 import jwp.fuzz.*
-import java.lang.invoke.MethodHandles
-import java.lang.invoke.MethodType
-import java.util.*
-import java.util.concurrent.*
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.function.Function
 
 object Main {
@@ -15,12 +14,8 @@ object Main {
         println("Creating fuzzer")
         // Create the fuzzer
         val fuzzer = Fuzzer(Fuzzer.Config(
-            // Give the method handle to our static parser below
-            mh = MethodHandles.lookup().findStatic(
-                Main::class.java,
-                "parseNumber",
-                MethodType.methodType(Num::class.java, String::class.java)
-            ),
+            // Static method for our parser
+            method = Main::class.java.getDeclaredMethod("parseNumber", String::class.java),
             // Set the conf to pass in an initial value
             paramGenConf = Function {
                 ParamGen.Config(

@@ -1,20 +1,22 @@
 package jwp.fuzz
 
-import java.lang.invoke.MethodHandle
 import java.lang.invoke.WrongMethodTypeException
+import java.lang.reflect.Method
 import java.util.*
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.function.Function
 
 open class Fuzzer(val conf: Config) {
 
-    fun fuzz() {
+    fun fuzz(stopper: AtomicBoolean = AtomicBoolean()) {
         // Just go over every param set, invoking...
         var first = true
-        val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.mh)
-        conf.params.forEach { paramSet ->
+        val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.method)
+        for (paramSet in conf.params) {
+            if (stopper.get()) break
             var fut: CompletableFuture<ExecutionResult>? = conf.invoker.invoke(invokerConf, *paramSet)
             // As a special case for the first run, we wait for completion and fail the
             // whole thing if it's the wrong method type.
@@ -30,7 +32,6 @@ open class Fuzzer(val conf: Config) {
             if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
             if (conf.params is ParamProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
         }
-
         // Shutdown and wait for a really long time...
         conf.invoker.shutdownAndWaitUntilComplete(1000, TimeUnit.DAYS)
     }
@@ -40,10 +41,10 @@ open class Fuzzer(val conf: Config) {
     }
 
     data class Config(
-        val mh: MethodHandle,
+        val method: Method,
         val paramGenConf: Function<Int, ParamGen.Config> = Function { ParamGen.Config() },
         val params: ParamProvider = ParamProvider.Suggested(
-            mh.type().parameterArray().mapIndexed { index, cls -> ParamGen.suggested(cls, paramGenConf.apply(index)) }
+            method.parameterTypes.mapIndexed { index, cls -> ParamGen.suggested(cls, paramGenConf.apply(index)) }
         ),
         val postSubmissionHandler: PostSubmissionHandler? = null,
         // We default to just a single-thread, single-item queue

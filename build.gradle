@@ -64,6 +64,7 @@ project(':fuzz') {
 
     dependencies {
         compile 'org.jetbrains.kotlin:kotlin-stdlib-jdk8'
+        compileOnly 'com.squareup:javapoet:1.9.0' // optional
         testCompile 'org.jetbrains.kotlin:kotlin-test'
         testCompile 'org.jetbrains.kotlin:kotlin-test-junit'
         testCompile 'org.junit.jupiter:junit-jupiter-api:5.0.2'
@@ -116,4 +117,21 @@ project(':examples:simple') {
 
 project(':examples:csv') {
     mainClassName = 'jwp.examples.csv.Main'
+    run.args 'examples/csv/src/test/java', 'jwp.examples.csv.MainTest'
+    dependencies {
+        compile 'com.opencsv:opencsv:4.1'
+        compile 'com.squareup:javapoet:1.9.0'
+        testCompile 'junit:junit:4.12'
+    }
+    tasks.withType(JavaCompile) {
+        options.encoding = 'UTF-8'
+    }
+    test {
+        outputs.upToDateWhen { false }
+        testLogging {
+            afterSuite { desc, result ->
+                if (!desc.parent) println("${result.successfulTestCount} of ${result.testCount} tests succeeded")
+            }
+        }
+    }
 }

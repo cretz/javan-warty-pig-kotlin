@@ -1,10 +1,11 @@
 package jwp.fuzz
 
 import java.lang.invoke.MethodHandle
+import java.lang.reflect.Method
 import java.util.*
 
 data class ExecutionResult(
-    val mh: MethodHandle,
+    val method: Method,
     val params: List<*>,
     val traceResult: TraceResult,
     val invokeResult: InvokeResult,

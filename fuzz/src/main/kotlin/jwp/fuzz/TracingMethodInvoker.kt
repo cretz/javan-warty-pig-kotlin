@@ -1,6 +1,8 @@
 package jwp.fuzz
 
 import java.lang.invoke.MethodHandle
+import java.lang.invoke.MethodHandles
+import java.lang.reflect.Method
 import java.util.concurrent.*
 import java.util.function.Supplier
 
@@ -13,20 +15,22 @@ abstract class TracingMethodInvoker {
 
     data class Config(
         val tracer: Tracer,
-        val mh: MethodHandle
-    )
+        val method: Method
+    ) {
+        val methodHandle by lazy { MethodHandles.lookup().unreflect(method) }
+    }
 
     open class ExecutorServiceInvoker(val exec: ExecutorService) : TracingMethodInvoker() {
         override fun invoke(conf: Config, vararg params: Any?) = CompletableFuture.supplyAsync(Supplier {
             val actualParams = params.map { if (it is ParamGen.ParamRef<*>) it.value else it }.toTypedArray()
             val beginNs = System.nanoTime()
-            val traceComplete = JavaUtils.invokeTraced(conf.tracer, conf.mh, *actualParams)
+            val traceComplete = JavaUtils.invokeTraced(conf.tracer, conf.methodHandle, *actualParams)
             val endNs = System.nanoTime()
             val invokeResult =
                 if (traceComplete.exception == null) ExecutionResult.InvokeResult.Ok(traceComplete.result)
                 else ExecutionResult.InvokeResult.Failure(traceComplete.exception)
             ExecutionResult(
-                conf.mh,
+                conf.method,
                 params.toList(),
                 traceComplete.tracerResult,
                 invokeResult,

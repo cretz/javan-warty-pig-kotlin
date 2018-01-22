@@ -1,9 +1,5 @@
 package jwp.fuzz
 
-import java.util.function.Predicate
-import java.util.stream.Stream
-import kotlin.streams.asStream
-
 abstract class TraceResult {
 
     abstract val branchesWithResolvedMethods: List<BranchWithResolvedMethods>
@@ -15,9 +11,9 @@ abstract class TraceResult {
         branchesWithResolvedMethods.sorted().
             map { it.stableHashCode(includeHitCounts) }.toIntArray().contentHashCode()
 
-    fun filtered(pred: Predicate<BranchWithResolvedMethods>): TraceResult = let { orig ->
+    fun filtered(pred: (BranchWithResolvedMethods) -> Boolean): TraceResult = let { orig ->
         object : TraceResult() {
-            override val branchesWithResolvedMethods get() = orig.branchesWithResolvedMethods.filter(pred::test)
+            override val branchesWithResolvedMethods get() = orig.branchesWithResolvedMethods.filter(pred)
         }
     }
 

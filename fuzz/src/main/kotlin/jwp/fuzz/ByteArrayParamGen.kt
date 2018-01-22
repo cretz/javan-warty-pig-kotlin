@@ -1,20 +1,20 @@
 package jwp.fuzz
 
+import java.io.Closeable
 import java.math.BigInteger
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
-import java.util.function.Supplier
 import kotlin.coroutines.experimental.buildSequence
 import kotlin.math.min
 
 open class ByteArrayParamGen(val conf: Config = Config()) :
-        ParamGen<ByteArrayParamGen.EntryParamRef<ByteArray>>, ParamGen.WithFeedback {
+        ParamGen.WithFeedbackAndCloseable<ByteArrayParamGen.EntryParamRef<ByteArray>>() {
 
     // Sorted by shortest first
     val userDictionary = conf.dictionary.sortedBy { it.size }
-    val seenBranchesCache = conf.branchesHashCacheSupplier.get()
-    val inputQueue = conf.byteArrayInputQueueSupplier.get().also { queue ->
+    val seenBranchesCache = conf.branchesHashCacheCreator()
+    val inputQueue = conf.byteArrayInputQueueCreator().also { queue ->
         conf.initialValues.forEach { queue.enqueue(TestCase(it)) }
     }
     val arithMax = conf.arithMax
@@ -27,6 +27,14 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     private var queueCycle = BigInteger.ZERO
     private var startMs = -1L
     private var lastEntry: QueueEntry? = null
+
+    // If anything is called after this method, the results are undefined
+    override fun close() {
+        var ex: Throwable? = null
+        try { inputQueue.close() } catch (e: Throwable) { ex = e }
+        try { seenBranchesCache.close() } catch (e: Throwable) { ex = e }
+        if (ex != null) throw ex
+    }
 
     override fun onResult(result: ExecutionResult, myParamIndex: Int) {
         synchronized(varMutex) {
@@ -265,10 +273,8 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     data class Config(
         val initialValues: List<ByteArray> = listOf("test".toByteArray()),
         val dictionary: List<ByteArray> = emptyList(),
-        val branchesHashCacheSupplier: Supplier<BranchesHashCache> =
-            Supplier { BranchesHashCache.InMemory() },
-        val byteArrayInputQueueSupplier: Supplier<ByteArrayInputQueue> =
-            Supplier { ByteArrayInputQueue.InMemory() },
+        val branchesHashCacheCreator: () -> BranchesHashCache = { BranchesHashCache.InMemory() },
+        val byteArrayInputQueueCreator: () -> ByteArrayInputQueue = { ByteArrayInputQueue.InMemory() },
         val havocTweaks: List<Havoc.Tweak> = Havoc.suggestedTweaks,
         val rand: Random = Random(),
         val arithMax: Int = 35,
@@ -321,7 +327,6 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             else score.compareTo(other.score)
 
         companion object {
-            @JvmStatic
             fun culled(cases: Iterable<TestCase>): List<TestCase> = cases.sorted().let { sorted ->
                 // We needed the cases sorted by score first
                 // Now, go over each, adding to favored for ones that have branches we haven't seen
@@ -335,8 +340,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         }
     }
 
-    @FunctionalInterface
-    interface BranchesHashCache {
+    interface BranchesHashCache : Closeable {
         // Must be thread safe. Return true if unique.
         fun checkUniqueAndStore(result: ExecutionResult): Boolean
 
@@ -344,18 +348,20 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
             override fun checkUniqueAndStore(result: ExecutionResult) =
                 seenBranchHashes.add(result.traceResult.stableBranchesHash)
+
+            override fun close() { }
         }
     }
 
     // Must be thread safe in all ops
-    interface ByteArrayInputQueue {
+    interface ByteArrayInputQueue : Closeable {
         // This should try to be unbounded, but should immediately throw if unable to enqueue
         fun enqueue(testCase: TestCase)
 
         // Implementations should return null immediately if there is nothing in the queue
         fun cullAndDequeue(): QueueEntry?
 
-        open class InMemory() : ByteArrayInputQueue {
+        open class InMemory : ByteArrayInputQueue {
             protected var queue = ArrayList<TestCase>()
             protected val lock = ReentrantLock()
             protected var enqueuedSinceLastDequeued = false
@@ -387,6 +393,8 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     lock.unlock()
                 }
             }
+
+            override fun close() { }
         }
     }
 
@@ -499,7 +507,6 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             overwriteRandomOrFixedBytes
         )
 
-        @FunctionalInterface
         interface Tweak {
             fun tweak(gen: ByteArrayParamGen, bytes: ByteArray): ByteArray
         }

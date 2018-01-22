@@ -1,8 +1,6 @@
 package jwp.fuzz
 
-import java.lang.invoke.MethodHandle
 import java.lang.reflect.Method
-import java.util.*
 
 data class ExecutionResult(
     val method: Method,

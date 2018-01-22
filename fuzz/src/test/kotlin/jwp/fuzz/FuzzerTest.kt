@@ -1,10 +1,7 @@
 package jwp.fuzz
 
 import jwp.fuzztest.TestMethods
-import java.lang.invoke.MethodHandles
-import java.lang.invoke.MethodType
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.Test
 
 class FuzzerTest : TestBase() {
@@ -15,11 +12,7 @@ class FuzzerTest : TestBase() {
         val branches = Collections.synchronizedList(ArrayList<ExecutionResult>())
         val fuzzer = Fuzzer(Fuzzer.Config(
             // We use a separate class here to avoid the default "jwp.fuzz." branch exclusion
-            mh = MethodHandles.lookup().findStatic(
-                TestMethods::class.java,
-                "simpleMethod",
-                MethodType.methodType(String::class.java, Int::class.java, Boolean::class.java)
-            ),
+            method = TestMethods::class.java.getDeclaredMethod("simpleMethod", Int::class.java, Boolean::class.java),
             postSubmissionHandler = object : Fuzzer.PostSubmissionHandler.TrackUniqueBranches() {
                 override fun onUnique(result: ExecutionResult) { branches.add(result) }
             }

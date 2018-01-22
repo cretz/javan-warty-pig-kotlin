@@ -1,23 +1,23 @@
 package jwp.fuzz
 
+import java.io.Closeable
 import java.util.*
-import java.util.function.Function
-import java.util.function.Predicate
 import kotlin.coroutines.experimental.SequenceBuilder
 import kotlin.coroutines.experimental.buildSequence
 
-interface ParamProvider : Iterable<Array<Any?>> {
+interface ParamProvider : Iterable<Array<Any?>>, Closeable {
 
     interface WithFeedback {
         fun onResult(result: ExecutionResult)
     }
 
-    abstract class WithFeedbackDelegated : ParamProvider, WithFeedback {
+    abstract class WithFeedbackAndCloseDelegated : ParamProvider, WithFeedback {
         abstract val gens: List<ParamGen<*>>
 
         override fun onResult(result: ExecutionResult) = gens.forEachIndexed { index, gen ->
             if (gen is ParamGen.WithFeedback) gen.onResult(result, index)
         }
+        override fun close() { gens.forEach { if (it is Closeable) it.close() } }
     }
 
     // All byte arrays change evenly amongst each other. The first few small fixed params are done w/ all
@@ -25,18 +25,18 @@ interface ParamProvider : Iterable<Array<Any?>> {
     open class Suggested(
         override val gens: List<ParamGen<*>>,
         val randSeed: Long = Random().nextLong()
-    ) : WithFeedbackDelegated() {
+    ) : WithFeedbackAndCloseDelegated() {
         private val prov by lazy {
             Partitioned(
                 gens = gens,
-                pred = Predicate { it is ByteArrayParamGen },
+                pred = { it is ByteArrayParamGen },
                 stopWhenBothHaveEndedOnce = true,
-                trueProvider = Function { EvenSingleParamChange(it) },
-                falseProvider = Function {
+                trueProvider = { EvenSingleParamChange(it) },
+                falseProvider = {
                     SeparateFixedAndUnfixedSize(
                         gens = it,
-                        fixedSizeProvider = Function { AllPermutations(it) },
-                        unfixedSizeProvider = Function { RandomSingleParamChange(it, randSeed) }
+                        fixedSizeProvider = { AllPermutations(it) },
+                        unfixedSizeProvider = { RandomSingleParamChange(it, randSeed) }
                     )
                 }
             )
@@ -47,38 +47,38 @@ interface ParamProvider : Iterable<Array<Any?>> {
 
     open class SeparateFixedAndUnfixedSize(
         override val gens: List<ParamGen<*>>,
-        val fixedSizeProvider: Function<List<ParamGen<*>>, ParamProvider>,
-        val unfixedSizeProvider: Function<List<ParamGen<*>>, ParamProvider>,
+        val fixedSizeProvider: (List<ParamGen<*>>) -> ParamProvider,
+        val unfixedSizeProvider: (List<ParamGen<*>>) -> ParamProvider,
         val stopWhenBothHaveEndedOnce: Boolean = true,
         val maxFixedSizeCount: Int = 500,
         val maxFixedSizeParams: Int = 5
-    ) : WithFeedbackDelegated() {
+    ) : WithFeedbackAndCloseDelegated() {
         override fun iterator(): Iterator<Array<Any?>> {
             var seenFixed = 0
-            return Partitioned(gens, fixedSizeProvider, unfixedSizeProvider, stopWhenBothHaveEndedOnce, Predicate {
+            return Partitioned(gens, fixedSizeProvider, unfixedSizeProvider, stopWhenBothHaveEndedOnce) {
                 val consideredFixed =
                     it is Collection<*> && it.size <= maxFixedSizeCount && seenFixed < maxFixedSizeParams
                 if (consideredFixed) seenFixed++
                 consideredFixed
-            }).iterator()
+            }.iterator()
         }
     }
 
     open class Partitioned(
         override val gens: List<ParamGen<*>>,
-        val trueProvider:  Function<List<ParamGen<*>>, ParamProvider>,
-        val falseProvider:  Function<List<ParamGen<*>>, ParamProvider>,
+        val trueProvider:  (List<ParamGen<*>>) -> ParamProvider,
+        val falseProvider:  (List<ParamGen<*>>) -> ParamProvider,
         val stopWhenBothHaveEndedOnce: Boolean,
-        val pred: Predicate<ParamGen<*>>
-    ) : WithFeedbackDelegated() {
+        val pred: (ParamGen<*>) -> Boolean
+    ) : WithFeedbackAndCloseDelegated() {
         override fun iterator(): Iterator<Array<Any?>> {
-            val (trueAndIndex, falseAndIndex) = gens.withIndex().partition { (_, value) -> pred.test(value) }
-            if (falseAndIndex.isEmpty()) return trueProvider.apply(gens).iterator()
-            if (trueAndIndex.isEmpty()) return falseProvider.apply(gens).iterator()
+            val (trueAndIndex, falseAndIndex) = gens.withIndex().partition { (_, value) -> pred(value) }
+            if (falseAndIndex.isEmpty()) return trueProvider(gens).iterator()
+            if (trueAndIndex.isEmpty()) return falseProvider(gens).iterator()
             return buildSequence {
-                val trueIterable = InfiniteRestartingIterable(trueProvider.apply(gens))
+                val trueIterable = InfiniteRestartingIterable(trueProvider(gens))
                 val trueIterator = trueIterable.iterator()
-                val falseIterable = InfiniteRestartingIterable(falseProvider.apply(gens))
+                val falseIterable = InfiniteRestartingIterable(falseProvider(gens))
                 val falseIterator = falseIterable.iterator()
                 val arr = arrayOfNulls<Any>(gens.size)
                 while (!stopWhenBothHaveEndedOnce ||
@@ -95,7 +95,7 @@ interface ParamProvider : Iterable<Array<Any?>> {
     open class EvenSingleParamChange(
         override val gens: List<ParamGen<*>>,
         val completeWhenAllCycledAtLeastOnce: Boolean = true
-    ) : WithFeedbackDelegated() {
+    ) : WithFeedbackAndCloseDelegated() {
         override fun iterator() = buildSequence {
             val iters = gens.map { it.iterator() }.toTypedArray()
             val cycleComplete = BooleanArray(gens.size)
@@ -115,7 +115,7 @@ interface ParamProvider : Iterable<Array<Any?>> {
 
     open class AllPermutations(
         override val gens: List<ParamGen<*>>
-    ) : WithFeedbackDelegated() {
+    ) : WithFeedbackAndCloseDelegated() {
         override fun iterator() = buildSequence { applyPermutation(0, arrayOfNulls<Any?>(gens.size)) }.iterator()
 
         private suspend fun SequenceBuilder<Array<Any?>>.applyPermutation(index: Int, workingSet: Array<Any?>) {
@@ -133,7 +133,7 @@ interface ParamProvider : Iterable<Array<Any?>> {
         val randSeed: Long? = null,
         val hashSetMaxBeforeReset: Int = 20000,
         val maxDupeGenBeforeQuit: Int = 200
-    ) : WithFeedbackDelegated() {
+    ) : WithFeedbackAndCloseDelegated() {
         override fun iterator() = buildSequence {
             val rand = if (randSeed == null) Random() else Random(randSeed)
             val iters = gens.map { it.iterator() }.toTypedArray()

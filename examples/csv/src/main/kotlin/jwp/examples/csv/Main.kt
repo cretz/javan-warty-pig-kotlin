@@ -11,7 +11,6 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.function.Function
 import kotlin.concurrent.schedule
 
 object Main {
@@ -26,7 +25,7 @@ object Main {
             // Static method for the parser
             method = Main::class.java.getDeclaredMethod("parseCsv", String::class.java),
             // Set the conf to pass in an initial value
-            paramGenConf = Function {
+            paramGenConf = {
                 ParamGen.Config(
                     byteArrayConfig = ByteArrayParamGen.Config(initialValues = listOf(
                         "foo,bar\nbaz,\"qux,quux\"".toByteArray()

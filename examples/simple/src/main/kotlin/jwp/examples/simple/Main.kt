@@ -4,7 +4,6 @@ import jwp.fuzz.*
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
-import java.util.function.Function
 
 object Main {
 
@@ -17,7 +16,7 @@ object Main {
             // Static method for our parser
             method = Main::class.java.getDeclaredMethod("parseNumber", String::class.java),
             // Set the conf to pass in an initial value
-            paramGenConf = Function {
+            paramGenConf = {
                 ParamGen.Config(
                     byteArrayConfig = ByteArrayParamGen.Config(initialValues = listOf("+1.2".toByteArray()))
                 )

@@ -51,20 +51,19 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         ))
     }
 
-    // Start with the initial values then generate
-    override fun iterator() = (initialValues().asSequence() +  generateSequence {
+    override fun iterator() = generateSequence {
         // If we can't dequeue anything, we use the last entry and call random havoc...
-        // if there is no last, it means we had an empty queue to begin with, boo
+        // if there is no last, it means we had an empty queue to begin with and we use initial values
         inputQueue.cullAndDequeue()?.let(::stages) ?: lastEntry?.let { lastEntry ->
-            stageHavoc(lastEntry.bytes).asSequence().map { EntryParamRef(it, lastEntry) }.asIterable()
-        } ?: error("Empty queue")
-    }.flatten()).iterator()
+            stageHavoc(lastEntry.bytes).asSequence().map { EntryParamRef(it, lastEntry) }
+        } ?: initialValues()
+    }.flatten().iterator()
 
     open fun initialValues() = conf.initialValues.mapIndexed { index, initVal ->
         EntryParamRef(initVal, QueueEntry(initVal, (index - conf.initialValues.size).toLong()))
-    }.asIterable()
+    }.asSequence()
 
-    open fun stages(entry: QueueEntry): Iterable<EntryParamRef<ByteArray>> {
+    open fun stages(entry: QueueEntry): Sequence<EntryParamRef<ByteArray>> {
         // TODO: trimming
         synchronized(varMutex) {
             lastEntry = entry
@@ -88,20 +87,20 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             // TODO: user extras
             stageHavoc(entry.bytes)
             // TODO: splices
-        ).flatten().map { EntryParamRef(it, entry) }.asIterable()
+        ).flatten().map { EntryParamRef(it, entry) }
     }
 
     open fun stageFlipBits(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
         for (bitIndex in 0 until ((buf.size * 8) - (consecutiveToFlip - 1))) yield(buf.copyAnd {
             for (offset in 0 until consecutiveToFlip) flipBit(bitIndex + offset)
         })
-    }.asIterable()
+    }
 
     open fun stageFlipBytes(buf: ByteArray, consecutiveToFlip: Int) = buildSequence {
         for (byteIndex in 0 until (buf.size - (consecutiveToFlip - 1))) yield(buf.copyAnd {
             for (offset in 0 until consecutiveToFlip) invByte(byteIndex + offset)
         })
-    }.asIterable()
+    }
 
     open fun stageArith8(buf: ByteArray) = buildSequence {
         for (index in 0 until buf.size) {
@@ -111,7 +110,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                 if (!oldByte.couldHaveBitFlippedTo(newByte)) yield(buf.copyAnd { set(index, newByte) })
             }
         }
-    }.asIterable()
+    }
 
     open fun stageArith16(buf: ByteArray) = buildSequence {
         fun affectsBothBytes(orig: Short, new: Short) =
@@ -128,7 +127,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     yield(buf.copyAnd { putShortBe(index, newBe) })
             }
         }
-    }.asIterable()
+    }
 
     open fun stageArith32(buf: ByteArray) = buildSequence {
         fun affectsMoreThanTwoBytes(orig: Int, new: Int) =
@@ -148,7 +147,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     yield(buf.copyAnd { putIntBe(index, newBe) })
             }
         }
-    }.asIterable()
+    }
 
     open fun stageInteresting8(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Byte, new: Byte) =
@@ -158,7 +157,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             if (!couldBeArith(orig, byte) && !orig.couldHaveBitFlippedTo(byte))
                 yield(buf.copyAnd { set(index, byte) })
         }
-    }.asIterable()
+    }
 
     open fun stageInteresting16(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Short, new: Short): Boolean {
@@ -180,7 +179,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     !origLe.couldHaveBitFlippedTo(shortBe))
                 yield(buf.copyAnd { putShortBe(index, short) })
         }
-    }.asIterable()
+    }
 
     open fun stageInteresting32(buf: ByteArray) = buildSequence {
         fun couldBeArith(orig: Int, new: Int): Boolean {
@@ -229,7 +228,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     !couldBeInteresting16(origLe, intBe) && !origLe.couldHaveBitFlippedTo(intBe))
                 yield(buf.copyAnd { putIntBe(index, intBe) })
         }
-    }.asIterable()
+    }
 
     open fun stageDictionary(buf: ByteArray, sortedDictionary: List<ByteArray>) = buildSequence {
         // To match AFL, we'll put different dictionary entries at an index before going on to the next index
@@ -240,7 +239,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                 })
             }
         }
-    }.asIterable()
+    }
 
     open fun stageHavoc(buf: ByteArray) = buildSequence {
         // TODO: base havoc cycles on perf
@@ -251,7 +250,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
             }
             yield(bytes)
         }
-    }.asIterable()
+    }
 
     open fun chooseBlockLen(limit: Int): Int {
         val rLim = synchronized(varMutex) {
@@ -271,6 +270,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
     }
 
     data class Config(
+        // Only applied when queue is empty
         val initialValues: List<ByteArray> = listOf("test".toByteArray()),
         val dictionary: List<ByteArray> = emptyList(),
         val branchesHashCacheCreator: () -> BranchesHashCache = { BranchesHashCache.InMemory() },
@@ -344,13 +344,18 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         // Must be thread safe. Return true if unique.
         fun checkUniqueAndStore(result: ExecutionResult): Boolean
 
-        open class InMemory : BranchesHashCache {
-            val seenBranchHashes = Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>())
+        open class SetBacked(
+            val set: MutableSet<Int>,
+            alreadySynchronized: Boolean = false
+        ) : BranchesHashCache {
+            protected val seenBranchHashes = if (alreadySynchronized) set else Collections.synchronizedSet(set)
             override fun checkUniqueAndStore(result: ExecutionResult) =
                 seenBranchHashes.add(result.traceResult.stableBranchesHash)
 
             override fun close() { }
         }
+
+        open class InMemory : SetBacked(Collections.newSetFromMap(ConcurrentHashMap<Int, Boolean>()), true)
     }
 
     // Must be thread safe in all ops
@@ -361,11 +366,11 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         // Implementations should return null immediately if there is nothing in the queue
         fun cullAndDequeue(): QueueEntry?
 
-        open class InMemory : ByteArrayInputQueue {
-            protected var queue = ArrayList<TestCase>()
+        open class ListBacked(list: MutableList<TestCase>) : ByteArrayInputQueue {
+            protected val queue = list
             protected val lock = ReentrantLock()
             protected var enqueuedSinceLastDequeued = false
-            protected var queueCounter = 0L
+            protected var queueCounter = queue.size.toLong()
 
             override fun enqueue(testCase: TestCase) {
                 lock.lock()
@@ -396,6 +401,8 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
 
             override fun close() { }
         }
+
+        open class InMemory : ListBacked(ArrayList())
     }
 
     object Havoc {

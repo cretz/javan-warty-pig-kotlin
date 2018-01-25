@@ -13,10 +13,9 @@ object Main {
 
     @JvmStatic
     fun main(args: Array<String>) {
-        // TODO: persistence
         // Create the fuzzer
         println("Creating fuzzer")
-        val folder = File(".chron").absoluteFile.also { it.mkdirs() }
+        val folder = File(".persist").absoluteFile.also { it.mkdirs() }
         val maxBranches = 300000L
         val fuzzer = Fuzzer(Fuzzer.Config(
             method = Main::class.java.getDeclaredMethod("sanitize", String::class.java),
@@ -31,11 +30,10 @@ object Main {
                         branchesHashCacheCreator = {
                             PersistChronicle.BranchesHashCache(ChronicleSetBuilder.of(Int::class.javaObjectType).
                                 entries(maxBranches).
-                                createOrRecoverPersistedTo(folder.resolve("branches-hash-cache")))
+                                createOrRecoverPersistedTo(folder.resolve("htmlsan-hashcache")))
                         },
                         byteArrayInputQueueCreator = {
-                            PersistChronicle.ByteArrayInputQueue(ChronicleQueueBuilder.
-                                single(folder.resolve("input-queue")).build())
+                            PersistFile.ByteArrayInputQueue(folder.resolve("htmlsan-inputqueue"))
                         }
                     )
                 )
@@ -44,7 +42,7 @@ object Main {
             postSubmissionHandler = object : PersistChronicle.TrackUniqueBranches(
                 set = ChronicleSetBuilder.of(Int::class.javaObjectType).
                     entries(maxBranches).
-                    createOrRecoverPersistedTo(folder.resolve("unique-branches")),
+                    createOrRecoverPersistedTo(folder.resolve("htmlsan-uniquebranches")),
                 includeHitCounts = false
             ) {
                 override fun onUnique(result: ExecutionResult) {
@@ -59,7 +57,8 @@ object Main {
             )
         ))
         println("Beginning fuzz")
-        fuzzer.fuzz()
+        fuzzer.fuzzFor(90, TimeUnit.SECONDS)
+        println("Fuzz complete")
     }
 
     val doNothingPolicy = HtmlPolicyBuilder().toFactory()

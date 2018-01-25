@@ -20,34 +20,35 @@ open class Fuzzer(val conf: Config) {
     }
 
     fun fuzz(stopper: AtomicBoolean = AtomicBoolean()) {
-        try {
-            // Just go over every param set, invoking...
-            var first = true
-            val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.method)
-            val stopExRef = AtomicReference<Throwable>()
-            for (paramSet in conf.params) {
-                if (stopper.get()) break
-                stopExRef.get()?.also { throw it }
-                var fut: CompletableFuture<ExecutionResult>? = conf.invoker.invoke(invokerConf, *paramSet)
-                // As a special case for the first run, we wait for completion and fail the
-                // whole thing if it's the wrong method type.
-                if (first) {
-                    first = false
-                    fut!!.get().let { execRes ->
-                        if (execRes.invokeResult is ExecutionResult.InvokeResult.Failure &&
-                                execRes.invokeResult.ex is WrongMethodTypeException) {
-                            throw FuzzException.FirstRunFailed(execRes.invokeResult.ex)
+        conf.params.use { params ->
+            try {
+                // Just go over every param set, invoking...
+                var first = true
+                val invokerConf = TracingMethodInvoker.Config(conf.tracer, conf.method)
+                val stopExRef = AtomicReference<Throwable>()
+                for (paramSet in params) {
+                    if (stopper.get()) break
+                    stopExRef.get()?.also { throw it }
+                    var fut: CompletableFuture<ExecutionResult>? = conf.invoker.invoke(invokerConf, *paramSet)
+                    // As a special case for the first run, we wait for completion and fail the
+                    // whole thing if it's the wrong method type.
+                    if (first) {
+                        first = false
+                        fut!!.get().let { execRes ->
+                            if (execRes.invokeResult is ExecutionResult.InvokeResult.Failure &&
+                                    execRes.invokeResult.ex is WrongMethodTypeException) {
+                                throw FuzzException.FirstRunFailed(execRes.invokeResult.ex)
+                            }
                         }
                     }
+                    if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
+                    if (params is ParamProvider.WithFeedback) fut?.thenAccept(params::onResult)
+                    if (conf.stopOnFutureFailure) fut?.whenComplete { _, ex -> ex?.also(stopExRef::set) }
                 }
-                if (conf.postSubmissionHandler != null) fut = conf.postSubmissionHandler.postSubmission(conf, fut!!)
-                if (conf.params is ParamProvider.WithFeedback) fut?.thenAccept(conf.params::onResult)
-                if (conf.stopOnFutureFailure) fut?.whenComplete { _, ex -> ex?.also(stopExRef::set) }
+            } finally {
+                // Shutdown and wait for a really long time...
+                conf.invoker.shutdownAndWaitUntilComplete(1000, TimeUnit.DAYS)
             }
-        } finally {
-            // Shutdown and wait for a really long time...
-            conf.invoker.shutdownAndWaitUntilComplete(1000, TimeUnit.DAYS)
-            conf.params.close()
         }
     }
 

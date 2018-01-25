@@ -14,3 +14,4 @@
 /examples/simple/bin
 /examples/htmlsan/build
 /.chron
+/.persist

@@ -6,6 +6,7 @@ import org.mapdb.DataOutput2
 import org.mapdb.Serializer
 
 object PersistMapDb {
+    @Deprecated("This does not work very well")
     abstract class TrackUniqueBranches(
         val db: DB,
         val hashSetName: String = TrackUniqueBranches::class.java.name,
@@ -18,6 +19,7 @@ object PersistMapDb {
         override fun close() { if (closeDbOnClose) db.close() }
     }
 
+    @Deprecated("This does not work very well")
     open class BranchesHashCache(
         val db: DB,
         val hashSetName: String = BranchesHashCache::class.java.name,
@@ -27,6 +29,7 @@ object PersistMapDb {
     }
 
     @Suppress("UNCHECKED_CAST")
+    @Deprecated("This does not work very well")
     open class ByteArrayInputQueue(
         val db: DB,
         val listName: String = ByteArrayInputQueue::class.java.name,

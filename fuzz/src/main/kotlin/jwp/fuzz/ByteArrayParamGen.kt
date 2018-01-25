@@ -378,6 +378,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                 try {
                     queue.add(testCase)
                     enqueuedSinceLastDequeued = true
+                    onQueueMutated()
                 } finally {
                     lock.unlock()
                 }
@@ -395,7 +396,9 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                         onQueueCullComplete()
                     }
                     // Take the first one
-                    return QueueEntry(queue.removeAt(0).bytes, queueCounter++)
+                    val bytes = queue.removeAt(0).bytes
+                    onQueueMutated()
+                    return QueueEntry(bytes, queueCounter++)
                 } finally {
                     lock.unlock()
                 }
@@ -403,6 +406,9 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
 
             // This is guaranteed to be thread safe. Base impl does nothing
             open fun onQueueCullComplete() { }
+
+            // This is guaranteed to be thread safe. Base impl does nothing
+            open fun onQueueMutated() { }
 
             override fun close() { }
         }

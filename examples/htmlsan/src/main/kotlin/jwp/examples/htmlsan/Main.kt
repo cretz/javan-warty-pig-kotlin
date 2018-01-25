@@ -1,9 +1,10 @@
 package jwp.examples.htmlsan
 
 import jwp.fuzz.*
-import org.mapdb.DB
-import org.mapdb.DBMaker
+import net.openhft.chronicle.queue.ChronicleQueueBuilder
+import net.openhft.chronicle.set.ChronicleSetBuilder
 import org.owasp.html.HtmlPolicyBuilder
+import java.io.File
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -15,6 +16,8 @@ object Main {
         // TODO: persistence
         // Create the fuzzer
         println("Creating fuzzer")
+        val folder = File(".chron").absoluteFile.also { it.mkdirs() }
+        val maxBranches = 300000L
         val fuzzer = Fuzzer(Fuzzer.Config(
             method = Main::class.java.getDeclaredMethod("sanitize", String::class.java),
             paramGenConf = {
@@ -24,13 +27,26 @@ object Main {
                         // Use a dictionary file for this one
                         dictionary = AflDictionary.read(
                             javaClass.getResource("html_tags.dict").readText().lines()
-                        ).values
+                        ).values,
+                        branchesHashCacheCreator = {
+                            PersistChronicle.BranchesHashCache(ChronicleSetBuilder.of(Int::class.javaObjectType).
+                                entries(maxBranches).
+                                createOrRecoverPersistedTo(folder.resolve("branches-hash-cache")))
+                        },
+                        byteArrayInputQueueCreator = {
+                            PersistChronicle.ByteArrayInputQueue(ChronicleQueueBuilder.
+                                single(folder.resolve("input-queue")).build())
+                        }
                     )
                 )
             },
-            // The handler where we'll print out what we found
-            postSubmissionHandler = object : Fuzzer.PostSubmissionHandler.TrackUniqueBranches(false) {
-                @Synchronized
+            // The handler where we'll print out what we found and throw on any error
+            postSubmissionHandler = object : PersistChronicle.TrackUniqueBranches(
+                set = ChronicleSetBuilder.of(Int::class.javaObjectType).
+                    entries(maxBranches).
+                    createOrRecoverPersistedTo(folder.resolve("unique-branches")),
+                includeHitCounts = false
+            ) {
                 override fun onUnique(result: ExecutionResult) {
                     println("New path for param '${result.rawParam(0)}', result: ${result.invokeResult} (exec #$totalExecutions) ${backingSet.size}")
                     (result.invokeResult as? ExecutionResult.InvokeResult.Failure)?.also { throw it.ex }

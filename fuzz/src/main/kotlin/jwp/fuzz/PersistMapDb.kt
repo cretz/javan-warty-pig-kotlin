@@ -9,11 +9,14 @@ object PersistMapDb {
     abstract class TrackUniqueBranches(
         val db: DB,
         val hashSetName: String = TrackUniqueBranches::class.java.name,
-        includeHitCounts: Boolean = true
+        includeHitCounts: Boolean = true,
+        val closeDbOnClose: Boolean = true
     ) : Fuzzer.PostSubmissionHandler.TrackUniqueBranches(
         includeHitCounts = includeHitCounts,
         backingSet = db.hashSet(hashSetName, Serializer.INTEGER).createOrOpen()
-    )
+    ) {
+        override fun close() { if (closeDbOnClose) db.close() }
+    }
 
     open class BranchesHashCache(
         val db: DB,

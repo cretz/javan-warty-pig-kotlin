@@ -1,5 +1,6 @@
 package jwp.fuzz
 
+import java.io.Closeable
 import java.lang.invoke.WrongMethodTypeException
 import java.lang.reflect.Method
 import java.util.*
@@ -70,7 +71,7 @@ open class Fuzzer(val conf: Config) {
         val stopOnFutureFailure: Boolean = true
     )
 
-    interface PostSubmissionHandler {
+    interface PostSubmissionHandler : Closeable {
         fun postSubmission(
             conf: Fuzzer.Config,
             future: CompletableFuture<ExecutionResult>
@@ -96,6 +97,9 @@ open class Fuzzer(val conf: Config) {
             }
 
             abstract fun onUnique(result: ExecutionResult)
+
+            // Does nothing
+            override fun close() { }
         }
     }
 }

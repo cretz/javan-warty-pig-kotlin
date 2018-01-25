@@ -2,7 +2,7 @@ group 'javan-warty-pig'
 version '0.1.0'
 
 buildscript {
-    ext.kotlin_version = '1.2.20'
+    ext.kotlin_version = '1.2.21'
     repositories {
         jcenter()
         mavenCentral()
@@ -68,6 +68,8 @@ project(':fuzz') {
         // Optional
         compileOnly 'com.squareup:javapoet:1.9.0'
         compileOnly 'org.mapdb:mapdb:3.0.5'
+        compileOnly 'net.openhft:chronicle-map:3.14.4'
+        compileOnly 'net.openhft:chronicle-queue:4.6.55'
 
         testCompile 'org.jetbrains.kotlin:kotlin-test'
         testCompile 'org.jetbrains.kotlin:kotlin-test-junit'
@@ -112,6 +114,8 @@ project(':examples') {
             compile project(':fuzz')
         }
         run.systemProperties System.properties
+        compileKotlin.kotlinOptions.jvmTarget = '1.8'
+        compileTestKotlin.kotlinOptions.jvmTarget = '1.8'
         applicationDefaultJvmArgs = ['-agentpath:../../agent/build/konan/bin/mingw/agent.dll']
     }
 }
@@ -144,7 +148,8 @@ project(':examples:csv') {
 project(':examples:htmlsan') {
     mainClassName = 'jwp.examples.htmlsan.Main'
     dependencies {
-        compile 'org.mapdb:mapdb:3.0.5'
+        compile 'net.openhft:chronicle-map:3.14.4'
+        compile 'net.openhft:chronicle-queue:4.6.55'
         compile 'com.googlecode.owasp-java-html-sanitizer:owasp-java-html-sanitizer:20171016.1'
     }
 }

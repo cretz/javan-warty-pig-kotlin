@@ -345,10 +345,11 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
         fun checkUniqueAndStore(result: ExecutionResult): Boolean
 
         open class SetBacked(
-            val set: MutableSet<Int>,
+            val backingSet: MutableSet<Int>,
             alreadySynchronized: Boolean = false
         ) : BranchesHashCache {
-            protected val seenBranchHashes = if (alreadySynchronized) set else Collections.synchronizedSet(set)
+            protected val seenBranchHashes =
+                if (alreadySynchronized) backingSet else Collections.synchronizedSet(backingSet)
             override fun checkUniqueAndStore(result: ExecutionResult) =
                 seenBranchHashes.add(result.traceResult.stableBranchesHash)
 
@@ -391,6 +392,7 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     if (enqueuedSinceLastDequeued) {
                         enqueuedSinceLastDequeued = false
                         TestCase.culled(queue).let { queue.clear(); queue.addAll(it) }
+                        onQueueCullComplete()
                     }
                     // Take the first one
                     return QueueEntry(queue.removeAt(0).bytes, queueCounter++)
@@ -398,6 +400,9 @@ open class ByteArrayParamGen(val conf: Config = Config()) :
                     lock.unlock()
                 }
             }
+
+            // This is guaranteed to be thread safe. Base impl does nothing
+            open fun onQueueCullComplete() { }
 
             override fun close() { }
         }

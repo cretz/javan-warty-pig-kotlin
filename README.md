@@ -1,5 +1,7 @@
 # Javan Warty Pig
 
+**NOTE: This version has been abandoned, use [this one](https://github.com/cretz/javan-warty-pig).**
+
 Javan Warty Pig, or JWP, is an [AFL](http://lcamtuf.coredump.cx/afl/)-like fuzzer for the JVM. It uses a
 [JVMTI](https://docs.oracle.com/javase/9/docs/specs/jvmti.html) agent to trace execution. The JVM side is written in
 Kotlin and the native agent is also written in Kotlin.
